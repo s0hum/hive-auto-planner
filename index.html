@@ -1,0 +1,1480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Plan a branching 30-second FTC BIOBUZZ autonomous on the field, simulate each hive and partner state, and export a Pedro Pathing OpMode that decides at runtime.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 1.5 21 6.75v10.5L12 22.5 3 17.25V6.75Z' fill='%23FFC516'/%3E%3C/svg%3E">
+<style>
+:root{color-scheme:light dark;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+<title>Hive Auto Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#F6F2E9; --panel:#FFFDF8; --panel2:#EFE9DC; --sunk:#E7E0D0;
+  --line:#DCD2BD; --line2:#C9BDA2;
+  --ink:#211C12; --ink2:#6B6350; --ink3:#968C75;
+  --amber:#B87D00; --amber2:#E9B33C; --amberglow:rgba(184,125,0,.14);
+  --red:#BE3B2C; --blue:#2A5FD0; --ok:#4A8640; --warn:#B9620B;
+  --shadow:0 1px 2px rgba(40,32,12,.07), 0 6px 18px rgba(40,32,12,.06);
+  --fieldmix:0;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131109; --panel:#1B1810; --panel2:#232016; --sunk:#100E09;
+    --line:#332E20; --line2:#46402E;
+    --ink:#F4F0E4; --ink2:#ADA28A; --ink3:#7C7360;
+    --amber:#FFC516; --amber2:#FFD75E; --amberglow:rgba(255,197,22,.13);
+    --red:#F2564A; --blue:#7099F7; --ok:#8FC97C; --warn:#EC9640;
+    --shadow:0 1px 0 rgba(255,255,255,.03), 0 10px 26px rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131109; --panel:#1B1810; --panel2:#232016; --sunk:#100E09;
+  --line:#332E20; --line2:#46402E;
+  --ink:#F4F0E4; --ink2:#ADA28A; --ink3:#7C7360;
+  --amber:#FFC516; --amber2:#FFD75E; --amberglow:rgba(255,197,22,.13);
+  --red:#F2564A; --blue:#7099F7; --ok:#8FC97C; --warn:#EC9640;
+  --shadow:0 1px 0 rgba(255,255,255,.03), 0 10px 26px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+  font-size:13px; line-height:1.45; -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,.disp{font-family:Archivo,"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;text-wrap:balance}
+.mono,code,pre,.num{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+.eyebrow{font-family:Archivo;font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--ink3)}
+
+/* ---------- shell ---------- */
+#app{height:100%;display:flex;flex-direction:column;min-height:0}
+.topbar{
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:10px 16px;padding-top:calc(10px + env(safe-area-inset-top,0px));
+  background:var(--panel);border-bottom:1px solid var(--line);
+}
+.brand{display:flex;align-items:baseline;gap:9px;margin-right:auto}
+.brand .mark{
+  width:18px;height:20px;background:var(--amber);flex:none;align-self:center;
+  clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
+}
+.brand h1{font-size:15px;margin:0;font-weight:700;letter-spacing:-.01em}
+.brand .sub{font-size:11px;color:var(--ink3)}
+.budget{display:flex;align-items:center;gap:8px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:var(--panel2)}
+.budget .v{font-size:14px;font-weight:600}
+.budget.over{border-color:var(--red);color:var(--red)}
+.budget.over .v{color:var(--red)}
+
+/* ---------- buttons ---------- */
+.btn{
+  background:var(--panel2);border:1px solid var(--line);border-radius:7px;
+  padding:5px 10px;cursor:pointer;font-size:12px;font-weight:500;
+  display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+}
+.btn:hover{border-color:var(--line2);background:var(--sunk)}
+.btn.primary{background:var(--amber);border-color:var(--amber);color:#1B1305;font-weight:600}
+.btn.primary:hover{background:var(--amber2);border-color:var(--amber2)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--ink2);padding:3px 6px}
+.btn.ghost:hover{background:var(--panel2);color:var(--ink)}
+.btn.tiny{padding:2px 7px;font-size:11px}
+.btn[disabled]{opacity:.4;cursor:default}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--panel2)}
+.seg button{background:transparent;border:0;padding:5px 11px;cursor:pointer;font-size:12px;color:var(--ink2);font-weight:500}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--panel);font-weight:600}
+.seg.alliance button[aria-pressed="true"][data-v="red"]{background:var(--red);color:#fff}
+.seg.alliance button[aria-pressed="true"][data-v="blue"]{background:var(--blue);color:#fff}
+
+/* ---------- workbench ---------- */
+.work{flex:1;min-height:0;display:grid;grid-template-columns:302px minmax(0,1fr) 352px}
+.rail{min-height:0;overflow-y:auto;background:var(--panel);display:flex;flex-direction:column}
+.rail.left{border-right:1px solid var(--line)}
+.rail.right{border-left:1px solid var(--line)}
+.sec{border-bottom:1px solid var(--line);padding:12px 14px}
+.sec.grow{flex:1;min-height:0;display:flex;flex-direction:column;border-bottom:0}
+.sechead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}
+
+/* ---------- state chips (hex) ---------- */
+.state{margin-bottom:11px}
+.state:last-child{margin-bottom:0}
+.state .nm{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;margin-bottom:5px}
+.state .nm .var{font-size:10.5px;color:var(--ink3);font-weight:400}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{
+  border:1px solid var(--line);background:var(--panel2);color:var(--ink2);
+  padding:4px 11px;border-radius:5px;cursor:pointer;font-size:11.5px;font-weight:500;
+  position:relative;
+}
+.chip:hover{border-color:var(--line2)}
+.chip[aria-pressed="true"]{background:var(--amberglow);border-color:var(--amber);color:var(--ink);font-weight:600}
+.chip[aria-pressed="true"]::before{
+  content:"";position:absolute;left:-1px;top:50%;transform:translateY(-50%);
+  width:7px;height:9px;background:var(--amber);
+  clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
+}
+.unused{font-size:10.5px;color:var(--warn);margin-top:3px}
+
+/* ---------- plan tree ---------- */
+.tree{flex:1;min-height:0;overflow-y:auto;margin:0 -4px}
+.node{border-radius:6px;padding:5px 7px;display:flex;gap:7px;align-items:flex-start;cursor:pointer;border:1px solid transparent}
+.node:hover{background:var(--panel2)}
+.node.sel{background:var(--amberglow);border-color:var(--amber)}
+.node.dead{opacity:.42}
+.node .ic{width:15px;flex:none;text-align:center;font-size:10px;font-weight:700;font-family:Archivo;color:var(--ink3);line-height:19px}
+.node.move .ic{color:var(--amber)}
+.node.branch .ic{color:var(--blue)}
+.node .bd{flex:1;min-width:0}
+.node .t{font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.node .m{font-size:10.5px;color:var(--ink3)}
+.kids{margin-left:11px;padding-left:9px;border-left:1px solid var(--line)}
+.caselab{
+  display:flex;align-items:center;gap:6px;font-size:10px;font-family:Archivo;font-weight:700;
+  letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);padding:6px 0 3px 2px;
+}
+.caselab .dot{width:6px;height:7px;background:var(--blue);clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+.caselab.active{color:var(--ink)}
+.caselab.active .dot{background:var(--amber)}
+.addrow{display:flex;gap:4px;padding:5px 0 2px 2px;flex-wrap:wrap}
+
+/* ---------- stage ---------- */
+.stage{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--bg)}
+.stagetools{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.toggles{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+.fieldwrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:14px;overflow:auto}
+#field{
+  width:min(100%,calc(100vh - 250px));aspect-ratio:1/1;max-width:100%;
+  border:1px solid var(--line2);border-radius:10px;background:#1b1b1b;box-shadow:var(--shadow);
+  touch-action:none;display:block;
+}
+.playbar{display:flex;align-items:center;gap:10px;padding:8px 14px;border-top:1px solid var(--line);background:var(--panel)}
+.playbar input[type=range]{flex:1;accent-color:var(--amber);min-width:60px}
+.tl{display:flex;height:22px;border-radius:5px;overflow:hidden;border:1px solid var(--line);background:var(--sunk);position:relative}
+.tl .blk{display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:600;font-family:Archivo;padding:0 3px;text-overflow:ellipsis;
+  letter-spacing:.03em;text-transform:uppercase;overflow:hidden;white-space:nowrap;border-right:1px solid var(--sunk);color:#1B1305}
+.tl .mark{position:absolute;top:0;bottom:0;width:2px;background:var(--red);z-index:2}
+.tlwrap{padding:0 14px 10px}
+.tllab{display:flex;justify-content:space-between;font-size:10px;color:var(--ink3);margin-top:3px}
+
+/* ---------- right rail ---------- */
+.tabs{display:flex;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:3}
+.tabs button{flex:1;background:transparent;border:0;border-bottom:2px solid transparent;padding:9px 4px;cursor:pointer;
+  font-family:Archivo;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3)}
+.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--amber)}
+.pane{padding:14px}
+.field{margin-bottom:11px}
+.field>label{display:block;font-size:10.5px;font-family:Archivo;font-weight:700;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--ink3);margin-bottom:4px}
+input[type=text],input[type=number],select,textarea{
+  width:100%;background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;
+}
+input[type=number]{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.hint{font-size:11px;color:var(--ink3);margin-top:-4px;margin-bottom:10px}
+.divider{height:1px;background:var(--line);margin:14px 0}
+table.routes{width:100%;border-collapse:collapse;font-size:11.5px}
+table.routes th{text-align:left;font-family:Archivo;font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--ink3);font-weight:700;padding:0 6px 5px 0;border-bottom:1px solid var(--line)}
+table.routes td{padding:6px 6px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
+table.routes tr{cursor:pointer}
+table.routes tr:hover td{background:var(--panel2)}
+table.routes tr.on td{background:var(--amberglow)}
+.tag{display:inline-block;padding:1px 6px;border-radius:4px;background:var(--panel2);border:1px solid var(--line);
+  font-size:10px;margin:1px 3px 1px 0;font-family:"IBM Plex Mono",monospace}
+.t-ok{color:var(--ok)} .t-bad{color:var(--red);font-weight:600}
+pre.code{
+  background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:11px;overflow:auto;
+  font-size:11px;line-height:1.55;max-height:56vh;white-space:pre;
+}
+.note{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--amber);
+  border-radius:6px;padding:9px 11px;font-size:11.5px;color:var(--ink2)}
+.note b{color:var(--ink)}
+.stlist{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px;background:var(--panel2)}
+.valrow{display:flex;gap:6px;align-items:center;margin-bottom:5px}
+.valrow input{flex:1}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:10.5px;color:var(--ink3);padding:0 14px 8px}
+.legend i{display:inline-block;width:12px;height:2px;vertical-align:middle;margin-right:4px}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:var(--bg);
+  padding:8px 15px;border-radius:7px;font-size:12px;z-index:50;box-shadow:var(--shadow)}
+@media (max-width:1180px){
+  .work{grid-template-columns:270px minmax(0,1fr) 310px}
+}
+@media (max-width:980px){
+  .work{display:block;overflow-y:auto}
+  .rail{overflow:visible;border:0;border-bottom:1px solid var(--line)}
+  .rail.left{order:2} .stage{order:1}
+  #field{width:100%;max-width:560px}
+  .fieldwrap{padding:14px 16px}
+  .tree{max-height:none}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div>
+        <h1>Hive Auto Planner</h1>
+        <div class="sub">BIOBUZZ · branching 30&nbsp;s autonomous for Pedro Pathing</div>
+      </div>
+    </div>
+    <div class="seg alliance" id="allianceSeg" role="group" aria-label="Alliance">
+      <button data-v="red" aria-pressed="true">Red</button>
+      <button data-v="blue" aria-pressed="false">Blue</button>
+    </div>
+    <div class="budget" id="budget" title="Runtime of the branch currently simulated">
+      <span class="eyebrow">This branch</span>
+      <span class="v mono" id="budgetV">0.0s</span>
+      <span style="font-size:11px;color:var(--ink3)">of 30 s</span>
+    </div>
+    <button class="btn" id="btnReset" title="Reload the worked example">Example</button>
+    <button class="btn" id="btnTheme" title="Switch light / dark">Theme</button>
+  </header>
+
+  <main class="work">
+    <!-- ================= LEFT ================= -->
+    <aside class="rail left">
+      <section class="sec">
+        <div class="sechead">
+          <span class="eyebrow">Match state · what the robot sees</span>
+        </div>
+        <div id="stateSim"></div>
+        <div class="hint" style="margin:8px 0 0">Set what's true on the field; the plan below follows that branch.</div>
+      </section>
+
+      <section class="sec grow">
+        <div class="sechead">
+          <span class="eyebrow">Auto plan</span>
+          <span class="mono" style="font-size:10.5px;color:var(--ink3)" id="planCount"></span>
+        </div>
+        <div class="tree" id="tree"></div>
+      </section>
+    </aside>
+
+    <!-- ================= CENTER ================= -->
+    <div class="stage">
+      <div class="stagetools">
+        <span class="eyebrow">Start pose</span>
+        <span class="mono" id="startReadout" style="font-size:11.5px"></span>
+        <div class="toggles">
+          <button class="btn tiny" id="tgGrid" aria-pressed="true">Grid</button>
+          <button class="btn tiny" id="tgMarks" aria-pressed="true">Landmarks</button>
+          <button class="btn tiny" id="tgGhost" aria-pressed="true">Other branches</button>
+          <button class="btn tiny" id="tgRobot" aria-pressed="true">Robot</button>
+        </div>
+      </div>
+
+      <div class="fieldwrap">
+        <svg id="field" viewBox="0 0 141.5 141.5" role="img" aria-label="BIOBUZZ field with planned autonomous routes"></svg>
+      </div>
+
+      <div class="legend">
+        <span><i style="background:var(--amber)"></i>active branch</span>
+        <span><i style="background:var(--ink3)"></i>other branches</span>
+        <span><i style="background:var(--blue)"></i>decision point</span>
+        <span>drag any handle · &#9633; endpoint · &#9671; control point</span>
+      </div>
+
+      <div class="tlwrap">
+        <div class="tl" id="timeline"></div>
+        <div class="tllab"><span>0s</span><span class="mono" id="tlTotal"></span><span>30s</span></div>
+      </div>
+
+      <div class="playbar">
+        <button class="btn" id="btnPlay">Play</button>
+        <input type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="Scrub through the active branch">
+        <span class="mono" id="scrubT" style="font-size:11.5px;min-width:96px;text-align:right"></span>
+      </div>
+    </div>
+
+    <!-- ================= RIGHT ================= -->
+    <aside class="rail right">
+      <div class="tabs" role="tablist">
+        <button role="tab" data-tab="step" aria-selected="true">Step</button>
+        <button role="tab" data-tab="states" aria-selected="false">States</button>
+        <button role="tab" data-tab="routes" aria-selected="false">Routes</button>
+        <button role="tab" data-tab="code" aria-selected="false">Code</button>
+      </div>
+      <div class="pane" id="paneStep"></div>
+      <div class="pane" id="paneStates" hidden></div>
+      <div class="pane" id="paneRoutes" hidden></div>
+      <div class="pane" id="paneCode" hidden></div>
+    </aside>
+  </main>
+</div>
+
+<script>
+"use strict";
+/* ===================================================================
+   Hive Auto Planner — branching autonomous for FTC BIOBUZZ (2026-27)
+   Coordinates follow the Pedro Pathing Visualizer: 141.5 in square,
+   x right, y up, heading in degrees CCW from +x.
+   =================================================================== */
+
+const FIELD = 141.5;
+const AUTO_LIMIT = 30;           // seconds, Competition Manual 10.4
+const MAX_ROUTES = 96;
+
+/* --- Field landmarks, from the Competition Manual (Sec. 9.6, 9.7, 9.3) --- */
+const LANDMARKS = {
+  cells: [
+    { id:"redAudienceCell", x:57.6, y:62.6, team:"red",  label:"RED cell · audience side", tags:"tags 4-7" },
+    { id:"redBackCell",     x:57.6, y:81.4, team:"red",  label:"RED cell · back side",     tags:"tags 0-3" },
+    { id:"blueAudienceCell",x:83.9, y:62.6, team:"blue", label:"BLUE cell · audience side",tags:"tags 38-41" },
+    { id:"blueBackCell",    x:83.9, y:81.4, team:"blue", label:"BLUE cell · back side",    tags:"tags 42-45" }
+  ],
+  flowers: [ {x:46.8,y:139.3}, {x:138.7,y:94.3}, {x:2.6,y:47.4}, {x:94.1,y:3.2} ],
+  zones: [
+    { t:"red",  kind:"load",   x:0,     y:94,   w:11.5, h:24,  label:"RED LOADING" },
+    { t:"blue", kind:"load",   x:130,   y:23.5, w:11.5, h:24,  label:"BLUE LOADING" },
+    { t:"red",  kind:"garden", x:0,     y:0,    w:23,   h:2.5, label:"RED GARDEN" },
+    { t:"blue", kind:"garden", x:118.5, y:139,  w:23,   h:2.5, label:"BLUE GARDEN" }
+  ]
+};
+
+const HEADING_MODES = [
+  { id:"tangent",        label:"Tangent (follow the curve)" },
+  { id:"reverseTangent", label:"Reverse tangent (drive backwards)" },
+  { id:"constant",       label:"Constant angle" },
+  { id:"linear",         label:"Linear turn (start → end)" }
+];
+
+/* ===================== model ===================== */
+let uid = 0;
+const nid = (p) => `${p}${(++uid).toString(36)}${Math.random().toString(36).slice(2,5)}`;
+
+function seedModel(){
+  return {
+    version: 1,
+    name: "RedHiveAuto",
+    alliance: "red",
+    robot: { w:16, h:16, maxVel:40, maxAccel:30, maxDecel:30, angVel:180 },
+    startPose: { x:8.5, y:132, h:0 },
+    states: [
+      { id:"hive", name:"Hive tipped", varName:"hiveTipped", type:"bool",
+        values:[ {id:"true", label:"Tipped"}, {id:"false", label:"Not tipped"} ],
+        note:"Has your HIVE already flipped from the orientation it was staged in? A TIP swaps which CELL faces up, so the launch target moves to the other side of the frame (the two CELLS sit about 18.8 in. apart). Read the AprilTag cluster on the downward-facing CELL: red 0-3 / 4-7, blue 38-41 / 42-45." },
+      { id:"pstart", name:"Partner start", varName:"partnerStart", javaType:"PartnerStart", type:"enum",
+        values:[ {id:"AUDIENCE_SIDE", label:"Audience side"},
+                 {id:"BACK_SIDE",     label:"Back side"} ],
+        note:"Agreed in the pit, then selected before INIT (gamepad, dashboard, or a second OpMode). Keeps the two robots out of the same lane." },
+      { id:"pscore", name:"Partner scored", varName:"partnerScored", type:"bool",
+        values:[ {id:"true", label:"Yes"}, {id:"false", label:"No"} ],
+        note:"Did the partner already tip the hive? Detect with a vision check of the CELL, or have them signal it. Drives whether you go for a second launch or bank the PARK." }
+    ],
+    steps: [
+      mv("Leave the wall", 28,118, [{x:16,y:126}], {mode:"linear", startDeg:0, endDeg:-50}),
+      { id:nid("b"), kind:"branch", name:"Which lane?", stateId:"pstart", cases:[
+        { valueId:"AUDIENCE_SIDE", steps:[ mv("Back lane", 40,100, [{x:34,y:112}], {mode:"linear", startDeg:-50, endDeg:-45}) ] },
+        { valueId:"BACK_SIDE",     steps:[ mv("Audience lane", 36,84, [{x:30,y:100}], {mode:"linear", startDeg:-50, endDeg:-20}) ] }
+      ]},
+      { id:nid("b"), kind:"branch", name:"Has the hive tipped?", stateId:"hive", cases:[
+        { valueId:"true", steps:[
+            mv("Cross to the far CELL", 34,88, [{x:38,y:74}], {mode:"constant", deg:-16}),
+            act("Launch 3 POLLEN", "launchPollen", 1400) ] },
+        { valueId:"false", steps:[
+            mv("Line up on the up CELL", 34,60, [], {mode:"constant", deg:6}),
+            act("Launch 3 POLLEN", "launchPollen", 1400) ] }
+      ]},
+      { id:nid("b"), kind:"branch", name:"Partner already tipped?", stateId:"pscore", cases:[
+        { valueId:"true", steps:[
+            mv("Park in LOADING ZONE", 7,106, [{x:20,y:96}], {mode:"linear", startDeg:0, endDeg:180}) ] },
+        { valueId:"false", steps:[
+            mv("Down to the left FLOWER", 14,48, [{x:26,y:60}], {mode:"constant", deg:180}),
+            act("Intake 2 POLLEN", "intakePollen", 1200),
+            mv("Second launch spot", 33,66, [{x:24,y:58}], {mode:"constant", deg:0}),
+            act("Launch 2 POLLEN", "launchPollen", 1200),
+            mv("Park in LOADING ZONE", 7,106, [{x:16,y:92}], {mode:"linear", startDeg:0, endDeg:180}) ] }
+      ]}
+    ]
+  };
+}
+function mv(name,x,y,ctrl,heading){ return { id:nid("m"), kind:"move", name, end:{x,y}, ctrl:ctrl||[], heading }; }
+function act(name,method,ms){ return { id:nid("a"), kind:"action", name, method, ms }; }
+
+/* ===================== geometry ===================== */
+function bezAt(pts, t){
+  let a = pts.map(p => ({x:p.x, y:p.y}));
+  while(a.length > 1){
+    const n = [];
+    for(let i=0;i<a.length-1;i++) n.push({ x:a[i].x+(a[i+1].x-a[i].x)*t, y:a[i].y+(a[i+1].y-a[i].y)*t });
+    a = n;
+  }
+  return a[0];
+}
+function bezTangentDeg(pts, t){
+  const e = 1e-4;
+  const a = bezAt(pts, Math.max(0, t-e)), b = bezAt(pts, Math.min(1, t+e));
+  return Math.atan2(b.y-a.y, b.x-a.x) * 180/Math.PI;
+}
+function sampleCurve(pts, n){
+  n = n || 64;
+  const out = [], cum = [0];
+  let prev = bezAt(pts,0); out.push(prev);
+  for(let i=1;i<=n;i++){
+    const p = bezAt(pts, i/n);
+    out.push(p);
+    cum.push(cum[i-1] + Math.hypot(p.x-prev.x, p.y-prev.y));
+    prev = p;
+  }
+  return { pts: out, cum, length: cum[n], n };
+}
+/** curve parameter t at an arc-length fraction */
+function paramAt(s, frac){
+  const target = Math.max(0, Math.min(1, frac)) * s.length;
+  if(s.length < 1e-9) return frac;
+  let i = 0;
+  while(i < s.n-1 && s.cum[i+1] < target) i++;
+  const span = s.cum[i+1]-s.cum[i];
+  const w = span < 1e-9 ? 0 : (target - s.cum[i]) / span;
+  return (i + w) / s.n;
+}
+const norm180 = d => { let a = ((d + 180) % 360 + 360) % 360 - 180; return a; };
+function lerpAngle(a, b, t){ return a + norm180(b - a) * t; }
+
+function headingAt(heading, s, frac){
+  switch(heading.mode){
+    case "constant":       return heading.deg || 0;
+    case "linear":         return lerpAngle(heading.startDeg||0, heading.endDeg||0, frac);
+    case "reverseTangent": return bezTangentDeg(s.raw, paramAt(s, frac)) + 180;
+    default:               return bezTangentDeg(s.raw, paramAt(s, frac));
+  }
+}
+function profileTime(dist, vmax, amax, dmax){
+  if(dist <= 1e-6) return 0;
+  const aD = vmax*vmax/(2*amax), dD = vmax*vmax/(2*dmax);
+  if(dist >= aD + dD) return vmax/amax + (dist-aD-dD)/vmax + vmax/dmax;
+  const vp = Math.sqrt(2*dist*amax*dmax/(amax+dmax));
+  return vp/amax + vp/dmax;
+}
+
+/** Geometry + timing for one move step launched from `pose`. */
+function solveMove(step, pose, robot){
+  const raw = [ {x:pose.x, y:pose.y}, ...step.ctrl.map(c=>({x:c.x,y:c.y})), {x:step.end.x, y:step.end.y} ];
+  const s = sampleCurve(raw, 64);
+  s.raw = raw;
+  const h0 = step.heading.mode === "constant" ? (step.heading.deg||0)
+           : step.heading.mode === "linear"   ? (step.heading.startDeg||0)
+           : headingAt(step.heading, s, 0);
+  const h1 = step.heading.mode === "constant" ? (step.heading.deg||0)
+           : step.heading.mode === "linear"   ? (step.heading.endDeg||0)
+           : headingAt(step.heading, s, 1);
+  const drive = profileTime(s.length, robot.maxVel, robot.maxAccel, robot.maxDecel);
+  const turn  = (Math.abs(norm180(h0 - pose.h)) + Math.abs(norm180(h1 - h0))) / robot.angVel;
+  return { raw, s, length:s.length, startPose:{x:pose.x,y:pose.y,h:h0}, endPose:{x:step.end.x,y:step.end.y,h:h1},
+           time: Math.max(drive, turn) };
+}
+
+/* ===================== route enumeration ===================== */
+/** Every branch combination reachable from the plan, with poses + timing baked in. */
+function enumerateRoutes(model){
+  const byId = Object.fromEntries(model.states.map(s=>[s.id,s]));
+  const routes = [];
+  let truncated = false;
+
+  function step(frames, pose, assign, items, time){
+    if(routes.length >= MAX_ROUTES){ truncated = true; return; }
+    let f = frames;
+    while(f.length && f[f.length-1].i >= f[f.length-1].list.length) f = f.slice(0,-1);
+    if(!f.length){ routes.push({ assign, items, time, endPose:pose }); return; }
+
+    const top = f[f.length-1], st = top.list[top.i];
+    const next = f.slice(0,-1).concat([{ list:top.list, i:top.i+1 }]);
+
+    if(st.kind === "branch"){
+      const sv = byId[st.stateId];
+      if(!sv){ step(next, pose, assign, items, time); return; }
+      const chosen = assign[st.stateId];
+      const vals = chosen ? [chosen] : sv.values.map(v=>v.id);
+      for(const v of vals){
+        const c = (st.cases||[]).find(c=>c.valueId===v);
+        step(next.concat([{ list: c ? c.steps : [], i:0 }]), pose,
+             { ...assign, [st.stateId]: v },
+             items.concat([{ kind:"branch", step:st, state:sv, valueId:v, pose }]), time);
+      }
+      return;
+    }
+    if(st.kind === "move"){
+      const g = solveMove(st, pose, model.robot);
+      step(next, g.endPose, assign,
+           items.concat([{ kind:"move", step:st, ...g }]), time + g.time);
+      return;
+    }
+    const d = (st.ms||0)/1000;
+    step(next, pose, assign, items.concat([{ kind:st.kind, step:st, pose, time:d }]), time + d);
+  }
+
+  step([{ list:model.steps, i:0 }], { ...model.startPose }, {}, [], 0);
+  return { routes, truncated };
+}
+function routeMatches(route, sim){
+  return Object.entries(route.assign).every(([k,v]) => sim[k] === v);
+}
+/** The set of step ids that the currently simulated route walks through. */
+function liveIds(route){
+  const s = new Set();
+  if(route) for(const it of route.items){ s.add(it.step.id); if(it.kind==="branch") s.add(it.step.id+"::"+it.valueId); }
+  return s;
+}
+</script>
+
+<script>
+"use strict";
+/* ===================== app state ===================== */
+const STORE = "hiveAutoPlanner.v2";
+let model = loadModel();
+let sim = defaultSim(model);
+let sel = null;
+let tab = "step";
+let show = { grid:true, marks:true, ghost:true, robot:true };
+let scrubFrac = 0, playing = false, playT0 = 0;
+let R = { routes:[], truncated:false }, active = null;
+const listReg = [];
+
+function defaultSim(m){
+  const s = {};
+  for(const st of m.states) s[st.id] = st.values[0] ? st.values[0].id : null;
+  return s;
+}
+function loadModel(){
+  try{
+    const raw = localStorage.getItem(STORE);
+    if(raw){ const m = JSON.parse(raw); if(m && m.steps) return m; }
+  }catch(e){}
+  return seedModel();
+}
+function save(){ try{ localStorage.setItem(STORE, JSON.stringify(model)); }catch(e){} }
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const r2 = (n) => Math.round(n*100)/100;
+const fmt = (n) => (Math.round(n*10)/10).toFixed(1);
+
+function findStep(id, list, parent){
+  list = list || model.steps;
+  for(let i=0;i<list.length;i++){
+    const s = list[i];
+    if(s.id === id) return { step:s, list, index:i };
+    if(s.kind === "branch"){
+      for(const c of s.cases){ const f = findStep(id, c.steps, s); if(f) return f; }
+    }
+  }
+  return null;
+}
+function stateById(id){ return model.states.find(s=>s.id===id); }
+
+/* ===================== master render ===================== */
+function render(){
+  // keep the simulator honest if states changed
+  for(const st of model.states) if(!st.values.some(v=>v.id===sim[st.id])) sim[st.id] = st.values[0]?st.values[0].id:null;
+  for(const k of Object.keys(sim)) if(!model.states.some(s=>s.id===k)) delete sim[k];
+
+  R = enumerateRoutes(model);
+  active = R.routes.find(rt => routeMatches(rt, sim)) || R.routes[0] || null;
+
+  renderStateSim();
+  renderTree();
+  renderField();
+  renderTimeline();
+  renderRightPane();
+  renderTop();
+  save();
+}
+function renderTop(){
+  const t = active ? active.time : 0;
+  $("#budgetV").textContent = fmt(t) + "s";
+  $("#budget").classList.toggle("over", t > AUTO_LIMIT);
+  $("#startReadout").textContent = `x ${r2(model.startPose.x)}  y ${r2(model.startPose.y)}  θ ${r2(model.startPose.h)}°`;
+  const nSteps = countSteps(model.steps);
+  $("#planCount").textContent = `${nSteps} steps · ${R.routes.length} route${R.routes.length===1?"":"s"}`;
+  document.querySelectorAll("#allianceSeg button").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.v === model.alliance)));
+}
+function countSteps(list){
+  let n = 0;
+  for(const s of list){ n++; if(s.kind==="branch") for(const c of s.cases) n += countSteps(c.steps); }
+  return n;
+}
+
+/* ===================== left: state simulator ===================== */
+function renderStateSim(){
+  const used = new Set();
+  (function scan(list){ for(const s of list){ if(s.kind==="branch"){ used.add(s.stateId); for(const c of s.cases) scan(c.steps);} } })(model.steps);
+  $("#stateSim").innerHTML = model.states.map(st => `
+    <div class="state">
+      <div class="nm">${esc(st.name)} <span class="var mono">${esc(st.varName)}</span></div>
+      <div class="chips">${st.values.map(v=>`
+        <button class="chip" data-state="${esc(st.id)}" data-val="${esc(v.id)}" aria-pressed="${sim[st.id]===v.id}">${esc(v.label)}</button>`).join("")}</div>
+      ${used.has(st.id) ? "" : `<div class="unused">Not branched on yet — add a decision in the plan.</div>`}
+    </div>`).join("") || `<div class="hint">No match states yet. Add one in the States tab.</div>`;
+}
+
+/* ===================== left: plan tree ===================== */
+function renderTree(){
+  listReg.length = 0;
+  const live = liveIds(active);
+  $("#tree").innerHTML = renderList(model.steps, true, live);
+}
+function renderList(list, isLive, live){
+  const idx = listReg.push(list) - 1;
+  const rows = list.map(s => renderNode(s, isLive, live)).join("");
+  return rows + `<div class="addrow">
+    <button class="btn ghost tiny" data-add="move" data-list="${idx}">+ Move</button>
+    <button class="btn ghost tiny" data-add="action" data-list="${idx}">+ Action</button>
+    <button class="btn ghost tiny" data-add="wait" data-list="${idx}">+ Wait</button>
+    <button class="btn ghost tiny" data-add="branch" data-list="${idx}">+ Decision</button>
+  </div>`;
+}
+function renderNode(s, isLive, live){
+  const on = isLive && live.has(s.id);
+  const selc = sel === s.id ? " sel" : "";
+  if(s.kind === "branch"){
+    const st = stateById(s.stateId);
+    const head = `<div class="node branch${selc}${on?"":" dead"}" data-sel="${esc(s.id)}">
+        <span class="ic">&#9670;</span>
+        <div class="bd"><div class="t">${esc(s.name || "Decision")}</div>
+        <div class="m mono">${st ? esc(st.varName) : "⚠ missing state"}</div></div></div>`;
+    const kids = (s.cases||[]).map(c => {
+      const v = st && st.values.find(v=>v.id===c.valueId);
+      const caseLive = on && live.has(s.id+"::"+c.valueId);
+      return `<div class="caselab${caseLive?" active":""}"><span class="dot"></span>${esc(v?v.label:c.valueId)}</div>
+              <div class="kids">${renderList(c.steps, caseLive, live)}</div>`;
+    }).join("");
+    return head + `<div class="kids">${kids}</div>`;
+  }
+  const ic = s.kind === "move" ? "&#9654;" : s.kind === "action" ? "&#9733;" : "&#9203;";
+  const meta = s.kind === "move" ? `→ ${r2(s.end.x)}, ${r2(s.end.y)}${s.ctrl.length?` · ${s.ctrl.length} ctrl`:""}`
+             : s.kind === "action" ? `${esc(s.method||"action")}() · ${s.ms||0} ms`
+             : `${s.ms||0} ms`;
+  return `<div class="node ${s.kind}${selc}${on?"":" dead"}" data-sel="${esc(s.id)}">
+      <span class="ic">${ic}</span>
+      <div class="bd"><div class="t">${esc(s.name||s.kind)}</div><div class="m mono">${meta}</div></div></div>`;
+}
+
+/* ===================== center: field ===================== */
+const FIELD_IMG = "data:image/webp;base64,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";
+
+function renderField(){
+  const svg = $("#field");
+  const g = [];
+  g.push(`<image href="${FIELD_IMG}" x="0" y="0" width="${FIELD}" height="${FIELD}" preserveAspectRatio="none" opacity="0.95"/>`);
+
+  if(show.grid){
+    let grid = "";
+    for(let i=0;i<=6;i++){ const p = i*FIELD/6;
+      grid += `<line x1="${p}" y1="0" x2="${p}" y2="${FIELD}"/><line x1="0" y1="${p}" x2="${FIELD}" y2="${p}"/>`; }
+    g.push(`<g stroke="rgba(255,255,255,.14)" stroke-width="0.25">${grid}</g>`);
+  }
+  if(show.marks) g.push(renderMarks());
+
+  // routes ------------------------------------------------------------
+  const drawn = new Set();
+  const ghost = [];
+  if(show.ghost) for(const rt of R.routes){
+    if(rt === active) continue;
+    for(const it of rt.items){
+      if(it.kind !== "move") continue;
+      const k = it.step.id + "|" + r2(it.startPose.x) + "," + r2(it.startPose.y);
+      if(drawn.has(k)) continue; drawn.add(k);
+      ghost.push(`<polyline points="${poly(it.s.pts)}" fill="none" stroke="var(--ink3)" stroke-width="0.55"
+        stroke-opacity="0.5" stroke-dasharray="1.6 1.4" stroke-linecap="round"/>`);
+    }
+  }
+  g.push(`<g>${ghost.join("")}</g>`);
+
+  if(active){
+    // branch markers
+    for(const it of active.items) if(it.kind === "branch")
+      g.push(`<circle cx="${it.pose.x}" cy="${fy(it.pose.y)}" r="2.6" fill="none" stroke="var(--blue)" stroke-width="0.6"/>
+              <circle cx="${it.pose.x}" cy="${fy(it.pose.y)}" r="0.9" fill="var(--blue)"/>`);
+    for(const it of active.items){
+      if(it.kind !== "move") continue;
+      const selq = sel === it.step.id;
+      g.push(`<polyline points="${poly(it.s.pts)}" fill="none" stroke="${selq?"var(--amber2)":"var(--amber)"}"
+        stroke-width="${selq?1.35:1.0}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    }
+  }
+
+  // handles ------------------------------------------------------------
+  const geoms = new Map();
+  for(const rt of R.routes) for(const it of rt.items)
+    if(it.kind === "move" && !geoms.has(it.step.id)) geoms.set(it.step.id, it);
+  if(active) for(const it of active.items) if(it.kind === "move") geoms.set(it.step.id, it);
+
+  const handleIds = new Set();
+  if(active) for(const it of active.items) if(it.kind==="move") handleIds.add(it.step.id);
+  if(sel) handleIds.add(sel);
+
+  for(const id of handleIds){
+    const it = geoms.get(id); if(!it) continue;
+    const selq = sel === id;
+    it.step.ctrl.forEach((c,i) => {
+      g.push(`<line x1="${it.raw[i].x}" y1="${fy(it.raw[i].y)}" x2="${c.x}" y2="${fy(c.y)}"
+        stroke="var(--amber)" stroke-opacity=".45" stroke-width="0.25" stroke-dasharray="1 1"/>`);
+      g.push(`<rect x="${c.x-1.3}" y="${fy(c.y)-1.3}" width="2.6" height="2.6" transform="rotate(45 ${c.x} ${fy(c.y)})"
+        fill="${selq?"var(--amber2)":"#0b0b0b"}" stroke="var(--amber)" stroke-width="0.4"
+        data-drag="ctrl" data-step="${esc(id)}" data-i="${i}" style="cursor:grab"/>`);
+    });
+    g.push(`<rect x="${it.step.end.x-1.5}" y="${fy(it.step.end.y)-1.5}" width="3" height="3" rx="0.5"
+      fill="${selq?"var(--amber2)":"var(--amber)"}" stroke="#151107" stroke-width="0.35"
+      data-drag="end" data-step="${esc(id)}" style="cursor:grab"/>`);
+  }
+
+  // start pose
+  const sp = model.startPose;
+  g.push(robotShape(sp, "var(--blue)", 0.55, 0.16));
+  g.push(`<circle cx="${sp.x}" cy="${fy(sp.y)}" r="1.8" fill="var(--blue)" stroke="#151107" stroke-width="0.35"
+     data-drag="start" style="cursor:grab"/>`);
+  const hx = sp.x + Math.cos(sp.h*Math.PI/180)*9, hy = sp.y + Math.sin(sp.h*Math.PI/180)*9;
+  g.push(`<line x1="${sp.x}" y1="${fy(sp.y)}" x2="${hx}" y2="${fy(hy)}" stroke="var(--blue)" stroke-width="0.5"/>`);
+  g.push(`<circle cx="${hx}" cy="${fy(hy)}" r="1.5" fill="none" stroke="var(--blue)" stroke-width="0.5"
+     data-drag="startH" style="cursor:grab"/>`);
+
+  // robot at scrub position
+  if(show.robot && active){
+    const p = poseAtFrac(active, scrubFrac);
+    if(p){
+      g.push(robotShape(p, "var(--amber)", 0.7, 0.13));
+      const ax = p.x + Math.cos(p.h*Math.PI/180)*7, ay = p.y + Math.sin(p.h*Math.PI/180)*7;
+      g.push(`<line x1="${p.x}" y1="${fy(p.y)}" x2="${ax}" y2="${fy(ay)}" stroke="var(--amber)" stroke-width="0.6"/>`);
+    }
+  }
+  svg.innerHTML = g.join("");
+}
+const fy = (y) => FIELD - y;
+const poly = (pts) => pts.map(p => `${r2(p.x)},${r2(fy(p.y))}`).join(" ");
+function robotShape(p, color, sw, fill){
+  const w = model.robot.w, h = model.robot.h;
+  return `<rect x="${p.x-w/2}" y="${fy(p.y)-h/2}" width="${w}" height="${h}" rx="1"
+    transform="rotate(${-p.h} ${p.x} ${fy(p.y)})" fill="${color}" fill-opacity="${fill}"
+    stroke="${color}" stroke-width="${sw}" pointer-events="none"/>`;
+}
+function renderMarks(){
+  const out = [];
+  for(const z of LANDMARKS.zones){
+    const c = z.t === "red" ? "var(--red)" : "var(--blue)";
+    out.push(`<rect x="${z.x}" y="${fy(z.y+z.h)}" width="${z.w}" height="${z.h}" fill="${c}" fill-opacity=".14" stroke="${c}" stroke-width="0.3"/>`);
+  }
+  for(const f of LANDMARKS.flowers)
+    out.push(`<circle cx="${f.x}" cy="${fy(f.y)}" r="2.1" fill="none" stroke="#E9B33C" stroke-width="0.45" stroke-dasharray="1 .8"/>`);
+  for(const c of LANDMARKS.cells){
+    const col = c.team === "red" ? "var(--red)" : "var(--blue)";
+    const on = c.team === model.alliance;
+    out.push(`<g opacity="${on?1:.42}">
+      <path d="M ${c.x} ${fy(c.y)-3.2} L ${c.x+2.8} ${fy(c.y)-1.6} L ${c.x+2.8} ${fy(c.y)+1.6} L ${c.x} ${fy(c.y)+3.2} L ${c.x-2.8} ${fy(c.y)+1.6} L ${c.x-2.8} ${fy(c.y)-1.6} Z"
+        fill="${col}" fill-opacity="${on?.28:.12}" stroke="${col}" stroke-width="0.4"/>
+      <text x="${c.x}" y="${fy(c.y)+1.1}" font-size="2.4" text-anchor="middle" fill="#fff" font-family="IBM Plex Mono, monospace">${esc(c.tags.replace("tags ",""))}</text>
+    </g>`);
+  }
+  return `<g pointer-events="none">${out.join("")}</g>`;
+}
+function poseAtFrac(route, frac){
+  const total = route.time || 0;
+  if(total <= 0) return route.items.length ? { ...model.startPose } : { ...model.startPose };
+  let t = frac * total, cur = { ...model.startPose };
+  for(const it of route.items){
+    if(it.kind === "move"){
+      if(t <= it.time || it === route.items[route.items.length-1]){
+        const f = it.time > 0 ? Math.max(0, Math.min(1, t/it.time)) : 1;
+        const p = bezAt(it.raw, paramAt(it.s, f));
+        return { x:p.x, y:p.y, h: headingAt(it.step.heading, it.s, f) };
+      }
+      t -= it.time; cur = it.endPose;
+    } else if(it.time){ if(t <= it.time) return cur; t -= it.time; }
+  }
+  return cur;
+}
+
+/* ===================== center: timeline ===================== */
+function renderTimeline(){
+  const el = $("#timeline");
+  if(!active){ el.innerHTML = ""; $("#tlTotal").textContent = ""; return; }
+  const span = Math.max(AUTO_LIMIT, active.time);
+  const blocks = active.items.filter(i => (i.time||0) > 0.01).map(i => {
+    const pct = (i.time/span)*100;
+    const col = i.kind === "move" ? "var(--amber)" : i.kind === "action" ? "var(--amber2)" : "var(--ink3)";
+    return `<div class="blk" style="width:${pct}%;background:${col};opacity:${i.kind==="move"?.92:.72}"
+      title="${esc(i.step.name||i.kind)} · ${fmt(i.time)}s">${pct > 13 ? esc(i.step.name||i.kind) : ""}</div>`;
+  }).join("");
+  const markPct = (AUTO_LIMIT/span)*100;
+  el.innerHTML = blocks + (active.time > AUTO_LIMIT ? `<div class="mark" style="left:${markPct}%"></div>` : "");
+  $("#tlTotal").innerHTML = active.time > AUTO_LIMIT
+    ? `<span class="t-bad">${fmt(active.time)}s — ${fmt(active.time-AUTO_LIMIT)}s over</span>`
+    : `<span class="t-ok">${fmt(active.time)}s</span>`;
+  $("#scrubT").textContent = `${fmt(scrubFrac*active.time)}s / ${fmt(active.time)}s`;
+}
+</script>
+
+<script>
+"use strict";
+/* ===================== right rail ===================== */
+function renderRightPane(){
+  ["step","states","routes","code"].forEach(t => {
+    const p = document.getElementById("pane" + t[0].toUpperCase() + t.slice(1));
+    p.hidden = t !== tab;
+  });
+  document.querySelectorAll(".tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
+  if(tab === "step")   renderInspector();
+  if(tab === "states") renderStatesPane();
+  if(tab === "routes") renderRoutesPane();
+  if(tab === "code")   renderCodePane();
+}
+
+function renderInspector(){
+  const el = $("#paneStep");
+  const f = sel && findStep(sel);
+  if(!f){
+    el.innerHTML = `
+      <div class="field"><label>Autonomous name</label>
+        <input type="text" id="mName" value="${esc(model.name)}"></div>
+      <div class="field"><label>Start pose</label>
+        <div class="row3">
+          <input type="number" id="sX" step="0.5" value="${r2(model.startPose.x)}" aria-label="start x">
+          <input type="number" id="sY" step="0.5" value="${r2(model.startPose.y)}" aria-label="start y">
+          <input type="number" id="sH" step="5" value="${r2(model.startPose.h)}" aria-label="start heading">
+        </div></div>
+      <div class="hint">x, y, heading°. G304: start touching the perimeter wall, inside your own half, clear of the LOADING ZONE.</div>
+      <div class="divider"></div>
+      <div class="eyebrow" style="display:block;margin-bottom:8px">Robot &amp; motion</div>
+      <div class="row2">
+        <div class="field"><label>Width in</label><input type="number" id="rW" step="0.5" value="${model.robot.w}"></div>
+        <div class="field"><label>Length in</label><input type="number" id="rH" step="0.5" value="${model.robot.h}"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Max vel in/s</label><input type="number" id="rV" step="1" value="${model.robot.maxVel}"></div>
+        <div class="field"><label>Max accel in/s²</label><input type="number" id="rA" step="1" value="${model.robot.maxAccel}"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Max decel in/s²</label><input type="number" id="rD" step="1" value="${model.robot.maxDecel}"></div>
+        <div class="field"><label>Turn rate °/s</label><input type="number" id="rR" step="10" value="${model.robot.angVel}"></div>
+      </div>
+      <div class="note">Select a step in the plan to edit it, or drag a handle on the field. Timings are an estimate from this motion profile — tune them against a real run.</div>`;
+    bind("#mName","input", e => { model.name = e.target.value; save(); });
+    numBind("#sX", v => model.startPose.x = v); numBind("#sY", v => model.startPose.y = v); numBind("#sH", v => model.startPose.h = v);
+    numBind("#rW", v => model.robot.w = v); numBind("#rH", v => model.robot.h = v);
+    numBind("#rV", v => model.robot.maxVel = Math.max(1,v)); numBind("#rA", v => model.robot.maxAccel = Math.max(1,v));
+    numBind("#rD", v => model.robot.maxDecel = Math.max(1,v)); numBind("#rR", v => model.robot.angVel = Math.max(1,v));
+    return;
+  }
+
+  const s = f.step;
+  let body = `<div class="field"><label>Name</label><input type="text" id="nName" value="${esc(s.name||"")}"></div>`;
+
+  if(s.kind === "move"){
+    const h = s.heading;
+    body += `<div class="field"><label>End point</label><div class="row2">
+        <input type="number" id="eX" step="0.5" value="${r2(s.end.x)}" aria-label="end x">
+        <input type="number" id="eY" step="0.5" value="${r2(s.end.y)}" aria-label="end y"></div></div>
+      <div class="field"><label>Control points</label>
+        <select id="nCtrl">
+          <option value="0"${s.ctrl.length===0?" selected":""}>0 — straight line</option>
+          <option value="1"${s.ctrl.length===1?" selected":""}>1 — quadratic curve</option>
+          <option value="2"${s.ctrl.length===2?" selected":""}>2 — cubic curve</option>
+        </select></div>`;
+    s.ctrl.forEach((c,i) => {
+      body += `<div class="field"><label>Control ${i+1}</label><div class="row2">
+        <input type="number" class="cX" data-i="${i}" step="0.5" value="${r2(c.x)}" aria-label="control ${i+1} x">
+        <input type="number" class="cY" data-i="${i}" step="0.5" value="${r2(c.y)}" aria-label="control ${i+1} y"></div></div>`;
+    });
+    body += `<div class="field"><label>Heading</label><select id="hMode">
+      ${HEADING_MODES.map(m=>`<option value="${m.id}"${h.mode===m.id?" selected":""}>${m.label}</option>`).join("")}</select></div>`;
+    if(h.mode === "constant")
+      body += `<div class="field"><label>Angle °</label><input type="number" id="hDeg" step="5" value="${r2(h.deg||0)}"></div>`;
+    if(h.mode === "linear")
+      body += `<div class="field"><label>Start ° → end °</label><div class="row2">
+        <input type="number" id="hS" step="5" value="${r2(h.startDeg||0)}" aria-label="start heading">
+        <input type="number" id="hE" step="5" value="${r2(h.endDeg||0)}" aria-label="end heading"></div></div>`;
+    const it = active && active.items.find(i => i.kind==="move" && i.step.id===s.id);
+    if(it) body += `<div class="note"><b>${fmt(it.length)} in</b> · <b>${fmt(it.time)}s</b> on the active branch.</div>`;
+    const aim = LANDMARKS.cells.filter(c => c.team === model.alliance);
+    body += `<div class="field" style="margin-top:12px"><label>Aim heading at</label>
+      <div class="addrow">${aim.map(c=>`<button class="btn tiny" data-aim="${c.x},${c.y}">${esc(c.label.replace(/^(RED|BLUE) /,""))}</button>`).join("")}</div></div>`;
+  } else if(s.kind === "action"){
+    body += `<div class="field"><label>Java method</label><input type="text" id="nMethod" value="${esc(s.method||"")}"></div>
+      <div class="field"><label>Duration ms</label><input type="number" id="nMs" step="100" value="${s.ms||0}"></div>
+      <div class="hint">Exported as <span class="mono">instant(this::method)</span> followed by a wait.</div>`;
+  } else if(s.kind === "wait"){
+    body += `<div class="field"><label>Duration ms</label><input type="number" id="nMs" step="100" value="${s.ms||0}"></div>`;
+  } else if(s.kind === "branch"){
+    body += `<div class="field"><label>Decide on</label><select id="nState">
+      ${model.states.map(st=>`<option value="${esc(st.id)}"${st.id===s.stateId?" selected":""}>${esc(st.name)}</option>`).join("")}</select></div>
+      <div class="note">Read at the moment the robot reaches this point — exported as
+      <span class="mono">${stateById(s.stateId) && stateById(s.stateId).type==="bool" ? "conditional(…)" : "match(…)"}</span>,
+      so everything after it is planned per case.</div>`;
+  }
+
+  body += `<div class="divider"></div><div class="addrow">
+    <button class="btn tiny" data-mv="-1">Move up</button>
+    <button class="btn tiny" data-mv="1">Move down</button>
+    <button class="btn tiny" data-dup="1">Duplicate</button>
+    <button class="btn tiny" data-del="1" style="margin-left:auto;color:var(--red)">Delete</button></div>`;
+
+  el.innerHTML = body;
+  bind("#nName","input", e => { s.name = e.target.value; render(); });
+  numBind("#eX", v => s.end.x = v); numBind("#eY", v => s.end.y = v);
+  numBind("#nMs", v => s.ms = Math.max(0, v));
+  bind("#nMethod","input", e => { s.method = e.target.value; render(); });
+  bind("#nCtrl","change", e => {
+    const n = +e.target.value, mid = active && active.items.find(i=>i.step.id===s.id);
+    const from = mid ? mid.startPose : model.startPose;
+    while(s.ctrl.length > n) s.ctrl.pop();
+    while(s.ctrl.length < n){
+      const k = (s.ctrl.length+1)/(n+1);
+      s.ctrl.push({ x: r2(from.x + (s.end.x-from.x)*k), y: r2(from.y + (s.end.y-from.y)*k) });
+    }
+    render();
+  });
+  el.querySelectorAll(".cX").forEach(i => i.addEventListener("input", e => { s.ctrl[+e.target.dataset.i].x = +e.target.value; render(); }));
+  el.querySelectorAll(".cY").forEach(i => i.addEventListener("input", e => { s.ctrl[+e.target.dataset.i].y = +e.target.value; render(); }));
+  bind("#hMode","change", e => {
+    const m = e.target.value, it = active && active.items.find(i=>i.step.id===s.id);
+    s.heading = m === "constant" ? { mode:"constant", deg: it ? r2(it.endPose.h) : 0 }
+              : m === "linear"   ? { mode:"linear", startDeg: it ? r2(it.startPose.h) : 0, endDeg: it ? r2(it.endPose.h) : 0 }
+              : { mode:m };
+    render();
+  });
+  numBind("#hDeg", v => s.heading.deg = v); numBind("#hS", v => s.heading.startDeg = v); numBind("#hE", v => s.heading.endDeg = v);
+  el.querySelectorAll("[data-aim]").forEach(b => b.addEventListener("click", () => {
+    const [cx,cy] = b.dataset.aim.split(",").map(Number);
+    const deg = r2(Math.atan2(cy - s.end.y, cx - s.end.x) * 180/Math.PI);
+    s.heading = s.heading.mode === "linear" ? { ...s.heading, endDeg: deg } : { mode:"constant", deg };
+    render();
+  }));
+  const mvb = el.querySelector("[data-mv='-1']"), mvf = el.querySelector("[data-mv='1']");
+  if(mvb) mvb.addEventListener("click", () => moveStep(f, -1));
+  if(mvf) mvf.addEventListener("click", () => moveStep(f, 1));
+  el.querySelector("[data-dup]").addEventListener("click", () => {
+    const copy = JSON.parse(JSON.stringify(s)); reid(copy); f.list.splice(f.index+1, 0, copy); sel = copy.id; render();
+  });
+  el.querySelector("[data-del]").addEventListener("click", () => { f.list.splice(f.index,1); sel = null; render(); });
+  bind("#nState","change", e => {
+    s.stateId = e.target.value;
+    const st = stateById(s.stateId);
+    s.cases = st.values.map(v => {
+      const old = s.cases.find(c=>c.valueId===v.id);
+      return old || { valueId:v.id, steps:[] };
+    });
+    render();
+  });
+}
+function reid(s){ s.id = nid(s.kind[0]); if(s.kind==="branch") for(const c of s.cases) c.steps.forEach(reid); }
+function moveStep(f, d){
+  const j = f.index + d;
+  if(j < 0 || j >= f.list.length) return;
+  const [x] = f.list.splice(f.index,1); f.list.splice(j,0,x); render();
+}
+function bind(q, ev, fn){ const e = document.querySelector(q); if(e) e.addEventListener(ev, fn); }
+function numBind(q, fn){ bind(q, "input", e => { const v = parseFloat(e.target.value); if(!isNaN(v)){ fn(v); render(); } }); }
+
+/* ===================== states pane ===================== */
+function renderStatesPane(){
+  $("#paneStates").innerHTML = model.states.map((st,si) => `
+    <div class="stlist" data-si="${si}">
+      <div class="row2"><div class="field"><label>Name</label><input type="text" class="stN" value="${esc(st.name)}"></div>
+      <div class="field"><label>Java name</label><input type="text" class="stV" value="${esc(st.varName)}"></div></div>
+      <div class="field"><label>Kind</label><select class="stT">
+        <option value="enum"${st.type==="enum"?" selected":""}>Enum — 2+ named cases</option>
+        <option value="bool"${st.type==="bool"?" selected":""}>Boolean — yes / no</option></select></div>
+      ${st.type==="enum" ? `<div class="field"><label>Cases</label>
+        ${st.values.map((v,vi)=>`<div class="valrow">
+          <input type="text" class="vL" data-vi="${vi}" value="${esc(v.label)}" aria-label="case label">
+          <input type="text" class="vI mono" data-vi="${vi}" value="${esc(v.id)}" aria-label="enum constant">
+          <button class="btn ghost tiny vD" data-vi="${vi}" title="Remove">&times;</button></div>`).join("")}
+        <button class="btn tiny vA">+ Case</button></div>` : ``}
+      <div class="field"><label>How the robot knows</label><textarea class="stNote" rows="3">${esc(st.note||"")}</textarea></div>
+      <button class="btn tiny stDel" style="color:var(--red)">Delete state</button>
+    </div>`).join("") + `
+    <button class="btn primary" id="addState">+ Add match state</button>
+    <div class="note" style="margin-top:12px"><b>Hive orientation</b> comes off the AprilTag cluster on the downward-facing CELL (Manual 9.9).
+    <b>Partner</b> states usually come from a pre-match agreement plus a vision check during AUTO.</div>`;
+
+  $("#paneStates").querySelectorAll(".stlist").forEach(box => {
+    const st = model.states[+box.dataset.si];
+    box.querySelector(".stN").addEventListener("input", e => { st.name = e.target.value; save(); renderStateSim(); renderTree(); });
+    box.querySelector(".stV").addEventListener("input", e => { st.varName = e.target.value; save(); renderStateSim(); });
+    box.querySelector(".stNote").addEventListener("input", e => { st.note = e.target.value; save(); });
+    box.querySelector(".stT").addEventListener("change", e => {
+      st.type = e.target.value;
+      if(st.type === "bool") st.values = [{id:"true",label:"Yes"},{id:"false",label:"No"}];
+      else if(st.values.length < 2 || st.values[0].id === "true")
+        st.values = [{id:"CASE_A",label:"Case A"},{id:"CASE_B",label:"Case B"}];
+      syncBranches(st); render();
+    });
+    box.querySelectorAll(".vL").forEach(i => i.addEventListener("input", e => { st.values[+e.target.dataset.vi].label = e.target.value; save(); render(); }));
+    box.querySelectorAll(".vI").forEach(i => i.addEventListener("change", e => {
+      const vi = +e.target.dataset.vi, old = st.values[vi].id, nv = e.target.value.trim().toUpperCase().replace(/[^A-Z0-9_]/g,"_") || ("CASE_"+vi);
+      st.values[vi].id = nv;
+      (function fix(list){ for(const s of list) if(s.kind==="branch"){ if(s.stateId===st.id) for(const c of s.cases) if(c.valueId===old) c.valueId = nv; for(const c of s.cases) fix(c.steps); } })(model.steps);
+      if(sim[st.id] === old) sim[st.id] = nv;
+      render();
+    }));
+    box.querySelectorAll(".vD").forEach(b => b.addEventListener("click", () => {
+      if(st.values.length <= 2) return toast("A decision needs at least two cases.");
+      st.values.splice(+b.dataset.vi,1); syncBranches(st); render();
+    }));
+    const va = box.querySelector(".vA");
+    if(va) va.addEventListener("click", () => { st.values.push({ id:"CASE_"+(st.values.length+1), label:"Case "+(st.values.length+1) }); syncBranches(st); render(); });
+    box.querySelector(".stDel").addEventListener("click", () => {
+      model.states = model.states.filter(x => x !== st);
+      (function strip(list){ for(let i=list.length-1;i>=0;i--){ const s=list[i];
+        if(s.kind==="branch"){ if(s.stateId===st.id) list.splice(i,1,...s.cases.flatMap(c=>c.steps)); else for(const c of s.cases) strip(c.steps); } } })(model.steps);
+      render();
+    });
+  });
+  $("#addState").addEventListener("click", () => {
+    const n = model.states.length + 1;
+    model.states.push({ id:nid("s"), name:"New state "+n, varName:"state"+n, javaType:"State"+n, type:"bool",
+      values:[{id:"true",label:"Yes"},{id:"false",label:"No"}], note:"" });
+    render();
+  });
+}
+function syncBranches(st){
+  (function walk(list){ for(const s of list) if(s.kind==="branch"){
+    if(s.stateId === st.id) s.cases = st.values.map(v => s.cases.find(c=>c.valueId===v.id) || { valueId:v.id, steps:[] });
+    for(const c of s.cases) walk(c.steps); } })(model.steps);
+}
+
+/* ===================== routes pane ===================== */
+function renderRoutesPane(){
+  const rows = R.routes.map((rt,i) => {
+    const tags = Object.entries(rt.assign).map(([k,v]) => {
+      const st = stateById(k); const vv = st && st.values.find(x=>x.id===v);
+      return `<span class="tag">${esc(vv?vv.label:v)}</span>`;
+    }).join("");
+    const over = rt.time > AUTO_LIMIT;
+    return `<tr data-route="${i}" class="${rt===active?"on":""}">
+      <td>${tags || `<span class="tag">no decisions</span>`}</td>
+      <td class="mono ${over?"t-bad":"t-ok"}" style="text-align:right;white-space:nowrap">${fmt(rt.time)}s</td></tr>`;
+  }).join("");
+  const worst = R.routes.reduce((a,b) => b.time > (a?a.time:-1) ? b : a, null);
+  $("#paneRoutes").innerHTML = `
+    <div class="note" style="margin-bottom:12px">Every combination your plan can hit. The slowest is
+      <b class="${worst && worst.time > AUTO_LIMIT ? "t-bad":"t-ok"}">${worst?fmt(worst.time):"0"}s</b> against the 30&nbsp;s AUTO period.</div>
+    <table class="routes"><thead><tr><th>Branch</th><th style="text-align:right">Time</th></tr></thead><tbody>${rows}</tbody></table>
+    ${R.truncated?`<div class="hint" style="margin-top:10px">Showing the first ${MAX_ROUTES} routes.</div>`:""}`;
+  $("#paneRoutes").querySelectorAll("tr[data-route]").forEach(tr => tr.addEventListener("click", () => {
+    const rt = R.routes[+tr.dataset.route];
+    sim = { ...sim, ...rt.assign }; scrubFrac = 0; render();
+  }));
+}
+</script>
+
+<script>
+"use strict";
+/* ===================== code generation ===================== */
+const JAVA_KEYWORDS = new Set(["abstract","assert","boolean","break","byte","case","catch","char","class","const","continue","default","do","double","else","enum","extends","final","finally","float","for","goto","if","implements","import","instanceof","int","interface","long","native","new","package","private","protected","public","return","short","static","strictfp","super","switch","synchronized","this","throw","throws","transient","try","void","volatile","while","path","line","curve","follow","match","sequential","conditional"]);
+function splitWords(s){
+  return String(s||"")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/[^A-Za-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
+}
+function camel(s, fallback){
+  const parts = splitWords(s);
+  if(!parts.length) return fallback || "step";
+  let out = parts[0].toLowerCase() + parts.slice(1).map(p => p[0].toUpperCase() + p.slice(1).toLowerCase()).join("");
+  if(/^[0-9]/.test(out)) out = "_" + out;
+  return JAVA_KEYWORDS.has(out) ? out + "_" : out;
+}
+function pascal(s, fallback){ const c = camel(s, fallback); return c[0].toUpperCase() + c.slice(1); }
+function enumConst(s){ const v = String(s||"").toUpperCase().replace(/[^A-Z0-9_]/g,"_").replace(/^([0-9])/,"_$1"); return v || "CASE"; }
+const jnum = (n) => { const v = Math.round(n*1000)/1000; return Object.is(v,-0) ? "0" : String(v); };
+
+function generate(model){
+  const used = new Set();
+  const uniq = (base) => { let n = base, i = 2; while(used.has(n)) n = base + (i++); used.add(n); return n; };
+  const byId = Object.fromEntries(model.states.map(s=>[s.id,s]));
+  const poses = [], poseKey = new Map();
+  const pathMethods = [], pathKey = new Map();
+  const helpers = [], caseMethods = [];
+  const actions = new Map();
+
+  function pose(x, y, h, hint){
+    const k = `${jnum(x)}|${jnum(y)}|${jnum(h)}`;
+    if(poseKey.has(k)) return poseKey.get(k);
+    const n = uniq(camel(hint, "pose"));
+    poseKey.set(k, n); poses.push({ n, x, y, h });
+    return n;
+  }
+  function pathFor(step, g){
+    const k = `${step.id}|${jnum(g.startPose.x)},${jnum(g.startPose.y)},${jnum(g.startPose.h)}`;
+    if(pathKey.has(k)) return pathKey.get(k);
+    const base = camel(step.name, "path");
+    const sp = pose(g.startPose.x, g.startPose.y, g.startPose.h, base + "Start");
+    const ep = pose(g.endPose.x,   g.endPose.y,   g.endPose.h,   base + "End");
+    const cp = step.ctrl.map((c,i) => pose(c.x, c.y, 0, base + "Ctrl" + (i+1)));
+    const geom = cp.length ? `curve(${[sp, ...cp, ep].join(", ")})` : `line(${sp}, ${ep})`;
+    const h = step.heading;
+    const head = h.mode === "constant"       ? `.constant(${jnum(h.deg||0)})`
+               : h.mode === "linear"         ? `.linear(${sp}, ${ep})`
+               : h.mode === "reverseTangent" ? `.reverseTangent()` : `.tangent()`;
+    const name = uniq(base);
+    pathMethods.push({ name, expr: geom + head, note: `${step.name||"Move"} — ${jnum(g.length)} in` });
+    pathKey.set(k, name);
+    return name;
+  }
+  function actionMethod(step){
+    const n = camel(step.method || step.name, "doAction");
+    if(!actions.has(n)) actions.set(n, step.name || n);
+    return n;
+  }
+  function addHelper(hint, parts){
+    const name = uniq(camel(hint, "branchLeg"));
+    helpers.push({ name, parts });
+    return name;
+  }
+
+  function flow(frames, pose0, assign){
+    let f = frames;
+    while(f.length && f[f.length-1].i >= f[f.length-1].list.length) f = f.slice(0,-1);
+    if(!f.length) return [];
+    const top = f[f.length-1], st = top.list[top.i];
+    const next = f.slice(0,-1).concat([{ list:top.list, i:top.i+1 }]);
+
+    if(st.kind === "move"){
+      const g = solveMove(st, pose0, model.robot);
+      return [`follow(follower, ${pathFor(st, g)}())`].concat(flow(next, g.endPose, assign));
+    }
+    if(st.kind === "wait") return [`waitMs(${Math.round(st.ms||0)})`].concat(flow(next, pose0, assign));
+    if(st.kind === "action"){
+      const a = [`instant(this::${actionMethod(st)})`];
+      if(st.ms > 0) a.push(`waitMs(${Math.round(st.ms)})`);
+      return a.concat(flow(next, pose0, assign));
+    }
+    const sv = byId[st.stateId];
+    if(!sv) return flow(next, pose0, assign);
+    if(assign[st.stateId]){
+      const c = (st.cases||[]).find(c => c.valueId === assign[st.stateId]);
+      return flow(next.concat([{ list: c?c.steps:[], i:0 }]), pose0, assign);
+    }
+    if(sv.type === "bool"){
+      const T = (st.cases||[]).find(c=>c.valueId==="true"), F = (st.cases||[]).find(c=>c.valueId==="false");
+      const tn = addHelper((st.name||sv.name) + " when true",  flow(next.concat([{list:T?T.steps:[],i:0}]), pose0, {...assign,[st.stateId]:"true"}));
+      const fn = addHelper((st.name||sv.name) + " when false", flow(next.concat([{list:F?F.steps:[],i:0}]), pose0, {...assign,[st.stateId]:"false"}));
+      return [`conditional(this::${camel(sv.varName)}, ${tn}(), ${fn}())`];
+    }
+    const type = pascal(sv.javaType || sv.varName, "State");
+    const entries = sv.values.map(v => {
+      const c = (st.cases||[]).find(c => c.valueId === v.id);
+      return { c: enumConst(v.id),
+               m: addHelper((st.name||sv.name) + " " + v.label, flow(next.concat([{list:c?c.steps:[],i:0}]), pose0, {...assign,[st.stateId]:v.id})) };
+    });
+    const cm = uniq(camel((st.name||sv.name) + " cases", "cases"));
+    caseMethods.push({ name:cm, type, entries });
+    return [`match(this::${camel(sv.varName)}, ${cm}())`];
+  }
+
+  const startName = pose(model.startPose.x, model.startPose.y, model.startPose.h, "startPose");
+  const rootParts = flow([{ list:model.steps, i:0 }], { ...model.startPose }, {});
+
+  /* ---- assemble ---- */
+  const cls = pascal(model.name, "AutoPath");
+  const seq = (parts, ind) => parts.length
+    ? `sequential(\n${parts.map(p => ind + "    " + p).join(",\n")}\n${ind})`
+    : `sequential()`;
+
+  const enums = model.states.filter(s => s.type === "enum").map(s =>
+    `    /** ${s.note ? s.note.replace(/\*\//g,"") : s.name} */\n` +
+    `    public enum ${pascal(s.javaType || s.varName,"State")} { ${s.values.map(v=>enumConst(v.id)).join(", ")} }`).join("\n\n");
+
+  const suppliers = model.states.map(s => {
+    const note = (s.note || "Decide how the robot reads this.").replace(/\*\//g,"");
+    if(s.type === "bool")
+      return `    /** ${note} */\n    private boolean ${camel(s.varName)}() {\n` +
+             `        // TODO: replace with a real reading.\n        return false;\n    }`;
+    const t = pascal(s.javaType || s.varName, "State");
+    return `    /** ${note} */\n    private ${t} ${camel(s.varName)}() {\n` +
+           `        // TODO: replace with a real reading (AprilTag cluster, sensor, or pre-match choice).\n` +
+           `        return ${t}.${enumConst(s.values[0] ? s.values[0].id : "CASE")};\n    }`;
+  }).join("\n\n");
+
+  const actionStubs = [...actions.entries()].map(([n,label]) =>
+    `    /** ${label.replace(/\*\//g,"")} */\n    private ${n}() {\n        // TODO: drive your mechanism here.\n    }`
+      .replace(`private ${n}()`, `private void ${n}()`)).join("\n\n");
+
+  const poseFields = poses.map(p =>
+    `    private final Pose ${p.n} = poseFactory.of(${jnum(p.x)}, ${jnum(p.y)}, ${jnum(p.h)});`).join("\n");
+
+  const pathFns = pathMethods.map(p =>
+    `    /** ${p.note.replace(/\*\//g,"")} */\n    public Path ${p.name}() {\n        return ${p.expr};\n    }`).join("\n\n");
+
+  const helperFns = helpers.map(h =>
+    `    private Command ${h.name}() {\n        return ${seq(h.parts, "        ")};\n    }`).join("\n\n");
+
+  const caseFns = caseMethods.map(c =>
+    `    private EnumMap<${c.type}, Command> ${c.name}() {\n` +
+    `        EnumMap<${c.type}, Command> cases = new EnumMap<>(${c.type}.class);\n` +
+    c.entries.map(e => `        cases.put(${c.type}.${e.c}, ${e.m}());`).join("\n") +
+    `\n        return cases;\n    }`).join("\n\n");
+
+  const cells = LANDMARKS.cells.filter(c => c.team === model.alliance)
+    .map(c => `// ${c.label}: (${c.x}, ${c.y}) — AprilTag ${c.tags}`).join("\n");
+
+  const routeSummary = R.routes.map(rt => {
+    const a = Object.entries(rt.assign).map(([k,v]) => {
+      const st = stateById(k), vv = st && st.values.find(x=>x.id===v);
+      return `${st?st.varName:k}=${vv?vv.label:v}`; }).join(", ");
+    return `//   ${(a || "no decisions").padEnd(62)} ${fmt(rt.time)}s${rt.time>AUTO_LIMIT?"   << over 30 s":""}`;
+  }).join("\n");
+
+  const java =
+`package org.firstinspires.ftc.teamcode;
+
+import static com.pedropathing.api.Paths.*;
+import static com.pedropathing.ivy.Scheduler.schedule;
+import static com.pedropathing.ivy.commands.Commands.*;
+import static com.pedropathing.ivy.groups.Groups.sequential;
+import static com.pedropathing.ivy.pedro.PedroCommands.follow;
+
+import com.pedropathing.api.PoseFactory;
+import com.pedropathing.follower.Follower;
+import com.pedropathing.ivy.Command;
+import com.pedropathing.ivy.Scheduler;
+import com.pedropathing.math.Pose;
+import com.pedropathing.paths.Path;
+import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
+import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
+
+import java.util.EnumMap;
+
+// Generated by Hive Auto Planner — FTC BIOBUZZ (${model.alliance.toUpperCase()} alliance).
+// Estimated runtime per branch (30 s AUTO period):
+${routeSummary}
+${cells ? "\n" + cells + "\n" : ""}
+@Autonomous(name = "${cls}", group = "Autonomous")
+public class ${cls} extends LinearOpMode {
+
+${enums ? enums + "\n" : ""}
+    // ---- What the robot reads while AUTO is running -----------------------
+${suppliers}
+
+${actionStubs ? "    // ---- Mechanisms -------------------------------------------------------\n" + actionStubs + "\n" : ""}
+    // ---- Geometry ---------------------------------------------------------
+    private Follower follower;
+    private final PoseFactory poseFactory = PoseFactory.degrees();
+
+${poseFields}
+
+    // ---- Routine ----------------------------------------------------------
+    // Every decision below is evaluated the moment the robot reaches it, not at INIT.
+    public Command autoRoutine() {
+        return ${seq(rootParts, "        ")};
+    }
+
+${helperFns}
+
+${caseFns}
+
+${pathFns}
+
+    @Override
+    public void runOpMode() {
+        Scheduler.reset();
+        follower = Constants.create(hardwareMap);
+        follower.setPose(${startName});
+        follower.update();
+
+        waitForStart();
+        schedule(autoRoutine());
+
+        while (opModeIsActive()) {
+            follower.update();
+            Scheduler.execute();
+
+            telemetry.addData("x", follower.pose().x());
+            telemetry.addData("y", follower.pose().y());
+            telemetry.addData("heading", follower.pose().heading());
+${model.states.map(s=>`            telemetry.addData("${esc(s.name)}", ${camel(s.varName)}());`).join("\n")}
+            telemetry.update();
+        }
+    }
+}
+`;
+
+  const pathsOnly =
+`import static com.pedropathing.api.Paths.*;
+
+import com.pedropathing.api.PoseFactory;
+import com.pedropathing.math.Pose;
+import com.pedropathing.paths.Path;
+
+public class Paths {
+
+    private final PoseFactory poseFactory = PoseFactory.degrees();
+
+${poseFields}
+
+${pathFns}
+}
+`;
+  return { java, pathsOnly };
+}
+
+let codeMode = "opmode";
+function renderCodePane(){
+  let out;
+  try{ out = generate(model); }
+  catch(err){ $("#paneCode").innerHTML = `<div class="note">Could not generate code: ${esc(err.message)}</div>`; return; }
+  const src = codeMode === "json" ? JSON.stringify(model, null, 2)
+            : codeMode === "paths" ? out.pathsOnly : out.java;
+  $("#paneCode").innerHTML = `
+    <div class="seg" style="margin-bottom:10px" id="codeSeg">
+      <button data-m="opmode" aria-pressed="${codeMode==="opmode"}">OpMode</button>
+      <button data-m="paths" aria-pressed="${codeMode==="paths"}">Paths</button>
+      <button data-m="json" aria-pressed="${codeMode==="json"}">JSON</button>
+    </div>
+    <div class="addrow" style="margin-bottom:8px">
+      <button class="btn primary tiny" id="btnCopy">Copy</button>
+      ${codeMode==="json"?`<button class="btn tiny" id="btnImport">Paste a plan…</button>`:``}
+    </div>
+    ${codeMode==="opmode"?`<div class="note" style="margin-bottom:10px">Decisions export as Ivy
+      <span class="mono">match()</span> / <span class="mono">conditional()</span>, which read their supplier
+      <b>when the robot reaches them</b>. Everything after a decision is planned separately per case, so each
+      branch carries its own poses. Fill in the <span class="mono">TODO</span> readers and mechanism methods.</div>`:``}
+    <pre class="code" id="codeOut">${esc(src)}</pre>`;
+  $("#codeSeg").querySelectorAll("button").forEach(b => b.addEventListener("click", () => { codeMode = b.dataset.m; renderCodePane(); }));
+  $("#btnCopy").addEventListener("click", async () => {
+    try{ await navigator.clipboard.writeText(src); toast("Copied to clipboard"); }
+    catch(e){
+      const r = document.createRange(); r.selectNodeContents($("#codeOut"));
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r); toast("Selected — press Ctrl/Cmd+C");
+    }
+  });
+  const imp = $("#btnImport");
+  if(imp) imp.addEventListener("click", () => {
+    const t = prompt("Paste a previously copied plan (JSON):");
+    if(!t) return;
+    try{
+      const m = JSON.parse(t);
+      if(!m.steps || !m.states) throw new Error("that isn't a plan");
+      model = m; sim = defaultSim(model); sel = null; scrubFrac = 0; render(); toast("Plan loaded");
+    }catch(e){ toast("Couldn't read that: " + e.message); }
+  });
+}
+
+/* ===================== interaction ===================== */
+function toast(msg){
+  const d = document.createElement("div");
+  d.className = "toast"; d.textContent = msg; document.body.appendChild(d);
+  setTimeout(() => d.remove(), 2200);
+}
+function fieldXY(ev){
+  const r = $("#field").getBoundingClientRect();
+  const k = FIELD / r.width;
+  return { x: (ev.clientX - r.left) * k, y: FIELD - (ev.clientY - r.top) * (FIELD / r.height) };
+}
+let drag = null;
+$("#field").addEventListener("pointerdown", ev => {
+  const t = ev.target.dataset && ev.target.dataset.drag;
+  if(!t) return;
+  drag = { type:t, step:ev.target.dataset.step, i:+ev.target.dataset.i };
+  if(drag.step){ sel = drag.step; }
+  $("#field").setPointerCapture(ev.pointerId);
+  ev.preventDefault();
+  render();
+});
+$("#field").addEventListener("pointermove", ev => {
+  if(!drag) return;
+  const p = fieldXY(ev);
+  const cx = Math.max(0, Math.min(FIELD, p.x)), cy = Math.max(0, Math.min(FIELD, p.y));
+  if(drag.type === "start"){ model.startPose.x = r2(cx); model.startPose.y = r2(cy); }
+  else if(drag.type === "startH"){
+    model.startPose.h = r2(Math.atan2(cy - model.startPose.y, cx - model.startPose.x) * 180/Math.PI);
+  } else {
+    const f = findStep(drag.step); if(!f) return;
+    if(drag.type === "end"){ f.step.end.x = r2(cx); f.step.end.y = r2(cy); }
+    else { f.step.ctrl[drag.i].x = r2(cx); f.step.ctrl[drag.i].y = r2(cy); }
+  }
+  render();
+});
+$("#field").addEventListener("pointerup", ev => { drag = null; try{ $("#field").releasePointerCapture(ev.pointerId); }catch(e){} });
+$("#field").addEventListener("pointercancel", () => { drag = null; });
+
+document.addEventListener("click", ev => {
+  const chip = ev.target.closest("[data-state][data-val]");
+  if(chip){ sim[chip.dataset.state] = chip.dataset.val; scrubFrac = 0; render(); return; }
+  const node = ev.target.closest("[data-sel]");
+  if(node){ sel = sel === node.dataset.sel ? null : node.dataset.sel; tab = "step"; render(); return; }
+  const add = ev.target.closest("[data-add]");
+  if(add){ addStep(add.dataset.add, listReg[+add.dataset.list]); return; }
+  const tb = ev.target.closest(".tabs button");
+  if(tb){ tab = tb.dataset.tab; renderRightPane(); return; }
+});
+function addStep(kind, list){
+  if(!list) return;
+  let s;
+  if(kind === "move"){
+    const last = active && [...active.items].reverse().find(i => i.kind==="move");
+    const from = last ? last.endPose : model.startPose;
+    s = mv("New move", r2(Math.min(FIELD-6, from.x + 18)), r2(from.y), [], { mode:"tangent" });
+  } else if(kind === "action") s = act("New action", "doThing", 800);
+  else if(kind === "wait")     s = { id:nid("w"), kind:"wait", name:"Wait", ms:500 };
+  else {
+    const st = model.states[0];
+    if(!st){ toast("Add a match state first."); tab = "states"; renderRightPane(); return; }
+    s = { id:nid("b"), kind:"branch", name:"Decide on " + st.name, stateId:st.id,
+          cases: st.values.map(v => ({ valueId:v.id, steps:[] })) };
+  }
+  list.push(s); sel = s.id; tab = "step"; render();
+}
+
+document.querySelectorAll("#allianceSeg button").forEach(b => b.addEventListener("click", () => {
+  model.alliance = b.dataset.v; render();
+}));
+const tg = (id, key) => $(id).addEventListener("click", () => {
+  show[key] = !show[key]; $(id).setAttribute("aria-pressed", String(show[key])); renderField();
+});
+tg("#tgGrid","grid"); tg("#tgMarks","marks"); tg("#tgGhost","ghost"); tg("#tgRobot","robot");
+
+$("#scrub").addEventListener("input", e => { scrubFrac = +e.target.value/1000; playing = false; $("#btnPlay").textContent = "Play"; renderField(); renderTimeline(); });
+$("#btnPlay").addEventListener("click", () => {
+  playing = !playing;
+  $("#btnPlay").textContent = playing ? "Pause" : "Play";
+  if(playing){ if(scrubFrac >= 0.999) scrubFrac = 0; playT0 = performance.now() - scrubFrac * (active?active.time:1) * 1000; requestAnimationFrame(tick); }
+});
+function tick(now){
+  if(!playing || !active) return;
+  const total = Math.max(0.001, active.time);
+  scrubFrac = Math.min(1, (now - playT0)/1000/total);
+  $("#scrub").value = Math.round(scrubFrac*1000);
+  renderField(); renderTimeline();
+  if(scrubFrac >= 1){ playing = false; $("#btnPlay").textContent = "Play"; return; }
+  requestAnimationFrame(tick);
+}
+$("#btnReset").addEventListener("click", () => {
+  if(!confirm("Replace the current plan with the worked example?")) return;
+  model = seedModel(); sim = defaultSim(model); sel = null; scrubFrac = 0; render(); toast("Example loaded");
+});
+$("#btnTheme").addEventListener("click", () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const next = cur === "dark" ? "light" : cur === "light" ? "dark"
+    : (matchMedia("(prefers-color-scheme: dark)").matches ? "light" : "dark");
+  document.documentElement.setAttribute("data-theme", next);
+  try{ localStorage.setItem(STORE + ".theme", next); }catch(e){}
+});
+try{ const th = localStorage.getItem(STORE + ".theme"); if(th) document.documentElement.setAttribute("data-theme", th); }catch(e){}
+
+document.addEventListener("keydown", ev => {
+  if(/^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
+  if(ev.key === "Escape"){ sel = null; render(); }
+  if(ev.key === " "){ ev.preventDefault(); $("#btnPlay").click(); }
+});
+
+render();
+</script>
+
+</body>
+</html>
