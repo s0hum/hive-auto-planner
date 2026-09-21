@@ -15,8 +15,10 @@ and export a [Pedro Pathing](https://pedropathing.com/) OpMode that makes those 
 - **Field editor** on the real BIOBUZZ field, using the Pedro Pathing Visualizer's
   coordinate system (141.5 in. square, x right, y up, heading in degrees CCW from +x).
   Drag endpoints and Bézier control points; pick tangent, reverse-tangent, constant or
-  linear heading per segment. The start pose has typed x / y / heading boxes above the
-  field as well as a drag handle, so you can enter a measured pose exactly.
+  linear heading per segment. Heading carries: a linear turn starts at whatever heading
+  the step before it ended on, so you only ever type where the robot should end up. The
+  start pose has typed x / y / heading boxes above the field as well as a drag handle,
+  so you can enter a measured pose exactly.
 - **Alliance mirror, matching Pedro's own.** Plan one side, get the other. The three
   modes are Pedro Pathing's three mirrors, with the same maths, so the picture and the
   generated code agree to the inch:
@@ -34,7 +36,10 @@ and export a [Pedro Pathing](https://pedropathing.com/) OpMode that makes those 
   for fields whose halves really are mirror images.
 
   **Mirror** in the field toolbar overlays the mirrored routine so you can check it
-  against the far half; **Mirror plan** flips the live plan over for editing (press it
+  against the far half. The overlay is live, not a still: it reads the same match-state
+  chips, so the branch it draws changes with them, and it carries a robot of its own that
+  moves with playback — the two alliances take the same time over mirrored geometry, so
+  Play walks both at once. **Mirror plan** flips the live plan over for editing (press it
   again to flip back — every mode is its own inverse); and the Code tab exports the
   mirrored alliance either **through the PoseFactory** — as-planned coordinates with
   `.mirrorAroundPoint(70.75, 70.75)` chained on, the way you'd write it by hand — or
@@ -44,8 +49,12 @@ and export a [Pedro Pathing](https://pedropathing.com/) OpMode that makes those 
   after one is planned separately per case.
 - **State simulator.** Set what is true on the field and the active route lights up on the
   canvas while the other branches stay ghosted.
-- **Runtime budget.** Every reachable combination is timed against the 30 s AUTO period
-  using a trapezoidal motion profile, so you can see which branch runs you out of time.
+- **Runtime budget.** Every reachable combination is timed against the 30 s AUTO period,
+  so you can see which branch runs you out of time. The clock comes from a mecanum model
+  you describe with a motor RPM and a wheel diameter rather than a top speed you guess at:
+  the four wheels share one budget, so a diagonal is slower than a straight line, a curve
+  that swings its heading is slower again, and acceleration falls out of the motor's
+  torque curve and the grip of the tiles.
 - **Java export.** Boolean states become `Commands.conditional(...)`, enum states become
   `Commands.match(...)` with an `EnumMap`. Both read their supplier when the robot *reaches*
   them, so a mid-auto decision works the way you'd expect. Pose and `Path` methods are
@@ -54,8 +63,11 @@ and export a [Pedro Pathing](https://pedropathing.com/) OpMode that makes those 
 
 ## Using it
 
-1. Set your alliance, start pose and robot dimensions (Step tab with nothing selected;
-   the start pose is also typable in the toolbar above the field).
+1. Set your alliance, start pose, robot size and drivetrain (Step tab with nothing
+   selected; the start pose is also typable in the toolbar above the field). The
+   drivetrain is a motor RPM, a wheel diameter, any reduction on top of the gearbox and
+   the robot's mass; the panel shows the forward, strafe, diagonal and turn speeds it
+   derives from them.
 2. Define the match states your auto has to react to (States tab).
 3. Build the plan in the left rail: **Move**, **Action**, **Wait**, **Decision**.
 4. Flip the state chips to walk each branch; check the Routes tab for the slowest one.
@@ -78,8 +90,10 @@ copy a plan out or paste one back in to move it between machines.
   Pedro's own `Pose.mirror()` is the left-right `mirrorX` reflection, not this rotation —
   it suits fields whose halves are mirror images, and it will put a BIOBUZZ plan in the
   wrong corner.
-- Timings come from a motion profile, not your robot. Calibrate the velocity and
-  acceleration numbers against a real run.
+- Timings come from a model, not your robot. It assumes four mecanum wheels driven by
+  four motors, takes stall torque from the motor's free speed the way the goBILDA 5203
+  range behaves, and uses one grip figure for all of them. Drivetrain efficiency is the
+  knob to calibrate: pull it down until the timings match a real run.
 - The generated code targets the current Pedro Pathing API (`com.pedropathing.api.Paths`,
   `PoseFactory`) and the Ivy command library. It assumes a `Constants.create(hardwareMap)`
   in your `teamcode` package, the same as the official quickstart.

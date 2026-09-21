@@ -18,16 +18,16 @@ Since there are no tests, verify changes by loading the page: the seeded example
 
 | Lines | Role |
 | --- | --- |
-| [319-532](index.html#L319-L532) | Constants (`FIELD`, `AUTO_LIMIT`, `LANDMARKS`), the plan model + `seedModel`, Bézier/heading geometry, `solveMove`, `enumerateRoutes` |
-| [534-819](index.html#L534-L819) | App state (`model`, `sim`, `sel`, `tab`), localStorage persistence, the master `render()`, then the base64 field image (`FIELD_IMG`, ~60 KB on [line 668](index.html#L668)) and the SVG field + timeline rendering |
-| [821-1073](index.html#L821-L1073) | Right rail: step inspector, states pane, routes pane |
-| [1075-1477](index.html#L1075-L1477) | Java code generation, code pane, pointer/keyboard interaction, bootstrap `render()` |
+| [344-747](index.html#L344-L747) | Constants (`FIELD`, `AUTO_LIMIT`, `LANDMARKS`), the mecanum drivetrain model, the plan model + `seedModel`, Bézier/heading geometry, `solveMove`, `enumerateRoutes` |
+| [749-1116](index.html#L749-L1116) | App state (`model`, `sim`, `sel`, `tab`), localStorage persistence + `migrate`, the master `render()`, then the base64 field image (`FIELD_IMG`, ~60 KB on [line 939](index.html#L939)) and the SVG field + timeline rendering |
+| [1118-1435](index.html#L1118-L1435) | Right rail: step inspector, states pane, routes pane |
+| [1437-1921](index.html#L1437-L1921) | Java code generation, code pane, pointer/keyboard interaction, bootstrap `render()` |
 
 ### The plan model
 
 `model.steps` is a tree of step objects, each with `kind`:
 
-- `move` — `end`, `ctrl[]` (Bézier control points), `heading` (`tangent` / `reverseTangent` / `constant` / `linear`)
+- `move` — `end`, `ctrl[]` (Bézier control points), `heading` (`tangent` / `reverseTangent` / `constant` / `linear`). A `linear` heading stores only `endDeg`: it interpolates from the pose the move is launched from, so heading carries step to step. `headingAt`/`headingAtIndex`/`traverseTime` therefore take that incoming angle as an `h0` argument, and `solveMove` passes `pose.h` for it.
 - `action` — a `method` name and a duration `ms`
 - `wait` — `ms`
 - `branch` — a `stateId` plus `cases[]`, each `{ valueId, steps[] }`; branches nest arbitrarily
@@ -36,9 +36,19 @@ Since there are no tests, verify changes by loading the page: the seeded example
 
 ### Two tree walks that must stay in sync
 
-`enumerateRoutes` ([483](index.html#L483)) and `generate`'s `flow` ([1140](index.html#L1140)) both walk the step tree with the same explicit frame-stack idiom (`frames` of `{list, i}`, popping exhausted frames, recursing into the chosen case). The first threads a pose and accumulates time to produce every reachable route (capped at `MAX_ROUTES = 96`, setting `truncated`); the second threads a pose and accumulates Java statements. A change to how steps compose — a new `kind`, new nesting — has to land in both or the simulation and the exported code will disagree.
+`enumerateRoutes` ([698](index.html#L698)) and `generate`'s `flow` ([1510](index.html#L1510)) both walk the step tree with the same explicit frame-stack idiom (`frames` of `{list, i}`, popping exhausted frames, recursing into the chosen case). The first threads a pose and accumulates time to produce every reachable route (capped at `MAX_ROUTES = 96`, setting `truncated`); the second threads a pose and accumulates Java statements. A change to how steps compose — a new `kind`, new nesting — has to land in both or the simulation and the exported code will disagree.
 
 Pose threading is why order matters: a move's start pose is the previous step's end pose, so `solveMove` is called with a running pose and the same geometry gets recomputed per route. `generate` deduplicates poses by rounded coordinates and `Path` methods by `stepId + startPose`, so the same physical move reached through different branches emits one method.
+
+### The drivetrain model
+
+`model.robot` is a description of a mecanum base — `motorRpm`, `wheelDia`, `gearRatio`, `massLb`, `eff`, plus the `w`/`h` used for drawing — not a set of motion limits. `drivetrain()` ([408](index.html#L408)) turns it into the numbers the timing needs, and nothing outside that function should read the raw fields to compute speed.
+
+Timing is therefore direction-dependent, which is the point: the four wheels share one speed budget (`holoCap`), so travelling sideways or turning while translating both cost from it. `traverseTime` ([571](index.html#L571)) samples the curve, caps the speed at every sample, then fits a profile under the caps with a forward pass limited by the motor's torque curve and a backward pass limited by braking. That replaced a scalar trapezoid, so a move's time no longer depends only on its length — the heading mode changes it too.
+
+Acceleration is derived, not entered: `MOTOR_NM_RPM` encodes that stall torque x free speed is near constant across a goBILDA 5203's gearbox range, which is what lets one RPM figure stand in for a torque spec. `MU` caps it at the tiles' grip.
+
+Old plans carry `maxVel`/`maxAccel`/`maxDecel`/`angVel`; `migrate` drops them at v3 and backfills `DRIVE_DEFAULTS`, and v4 strips every linear heading's `startDeg`. It runs on pasted-in JSON as well as localStorage.
 
 ### Rendering
 
