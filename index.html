@@ -136,13 +136,17 @@ button,input,select,textarea{font:inherit;color:inherit}
 .node .bd{flex:1;min-width:0}
 .node .t{font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .node .m{font-size:10.5px;color:var(--ink3)}
-.node .rm{
+.node .rm,.node .ord{
   flex:none;width:17px;height:17px;padding:0;line-height:15px;text-align:center;font-size:12px;
   border:1px solid transparent;border-radius:4px;background:none;color:var(--ink3);cursor:pointer;
   opacity:0;transition:opacity .12s,color .12s,border-color .12s;
 }
-.node:hover .rm,.node.sel .rm,.node .rm:focus-visible{opacity:1}
+.node .ord{font-size:9px}
+.node:hover .rm,.node.sel .rm,.node .rm:focus-visible,
+.node:hover .ord,.node.sel .ord,.node .ord:focus-visible{opacity:1}
 .node .rm:hover{color:var(--red);border-color:var(--red);background:var(--panel)}
+.node .ord:hover{color:var(--ink);border-color:var(--line2);background:var(--panel)}
+.node:hover .ord:disabled,.node.sel .ord:disabled{opacity:.22;cursor:default;color:var(--ink3);border-color:transparent;background:none}
 .kids{margin-left:11px;padding-left:9px;border-left:1px solid var(--line)}
 .caselab{
   display:flex;align-items:center;gap:6px;font-size:10px;font-family:Archivo;font-weight:700;
@@ -161,8 +165,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 .toggles .btn[aria-pressed="false"]{color:var(--ink3)}
 .startin{display:flex;gap:5px;align-items:center}
 .startin label{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink3)}
-.startin input[type=number]{width:62px;padding:3px 6px;font-size:11.5px}
-.startin input[type=number]:focus{outline:2px solid var(--amber);outline-offset:-1px}
+.startin input.num{width:62px;padding:3px 6px;font-size:11.5px}
+.startin input.num:focus{outline:2px solid var(--amber);outline-offset:-1px}
 .fieldwrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:14px;overflow:auto}
 #field{
   width:min(100%,calc(100vh - 250px));aspect-ratio:1/1;max-width:100%;
@@ -187,10 +191,10 @@ button,input,select,textarea{font:inherit;color:inherit}
 .field{margin-bottom:11px}
 .field>label{display:block;font-size:10.5px;font-family:Archivo;font-weight:700;letter-spacing:.07em;
   text-transform:uppercase;color:var(--ink3);margin-bottom:4px}
-input[type=text],input[type=number],select,textarea{
+input[type=text],select,textarea{
   width:100%;background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;
 }
-input[type=number]{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+input.num{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
 .hint{font-size:11px;color:var(--ink3);margin-top:-4px;margin-bottom:10px}
@@ -289,9 +293,9 @@ pre.code{
       <div class="stagetools">
         <span class="eyebrow">Start pose</span>
         <div class="startin">
-          <label for="spX">x<input type="number" id="spX" step="0.5" aria-label="Start x, inches"></label>
-          <label for="spY">y<input type="number" id="spY" step="0.5" aria-label="Start y, inches"></label>
-          <label for="spH">&#952;<input type="number" id="spH" step="5" aria-label="Start heading, degrees"></label>
+          <label for="spX">x<input type="text" inputmode="decimal" class="num" id="spX" data-step="0.5" aria-label="Start x, inches"></label>
+          <label for="spY">y<input type="text" inputmode="decimal" class="num" id="spY" data-step="0.5" aria-label="Start y, inches"></label>
+          <label for="spH">&#952;<input type="text" inputmode="decimal" class="num" id="spH" data-step="5" aria-label="Start heading, degrees"></label>
         </div>
         <div class="toggles">
           <button class="btn tiny" id="tgGrid" aria-pressed="true">Grid</button>
@@ -899,7 +903,7 @@ function renderTree(){
 }
 function renderList(list, isLive, live){
   const idx = listReg.push(list) - 1;
-  const rows = list.map(s => renderNode(s, isLive, live)).join("");
+  const rows = list.map((s,i) => renderNode(s, isLive, live, i, list.length)).join("");
   return rows + `<div class="addrow">
     <button class="btn ghost tiny" data-add="move" data-list="${idx}">+ Move</button>
     <button class="btn ghost tiny" data-add="action" data-list="${idx}">+ Action</button>
@@ -907,7 +911,7 @@ function renderList(list, isLive, live){
     <button class="btn ghost tiny" data-add="branch" data-list="${idx}">+ Decision</button>
   </div>`;
 }
-function renderNode(s, isLive, live){
+function renderNode(s, isLive, live, i, n){
   const on = isLive && live.has(s.id);
   const selc = sel === s.id ? " sel" : "";
   if(s.kind === "branch"){
@@ -916,7 +920,7 @@ function renderNode(s, isLive, live){
         <span class="ic">&#9670;</span>
         <div class="bd"><div class="t">${esc(s.name || "Decision")}</div>
         <div class="m mono">${st ? esc(st.varName) : "⚠ missing state"}</div></div>
-        ${rmBtn(s)}</div>`;
+        ${nodeBtns(s, i, n)}</div>`;
     const kids = (s.cases||[]).map(c => {
       const v = st && st.values.find(v=>v.id===c.valueId);
       const caseLive = on && live.has(s.id+"::"+c.valueId);
@@ -932,12 +936,19 @@ function renderNode(s, isLive, live){
   return `<div class="node ${s.kind}${selc}${on?"":" dead"}" data-sel="${esc(s.id)}">
       <span class="ic">${ic}</span>
       <div class="bd"><div class="t">${esc(s.name||s.kind)}</div><div class="m mono">${meta}</div></div>
-      ${rmBtn(s)}</div>`;
+      ${nodeBtns(s, i, n)}</div>`;
 }
-/** The hover-revealed remove affordance carried by every node in the plan tree. */
-function rmBtn(s){
-  return `<button class="rm" data-del-step="${esc(s.id)}" type="button"
-    title="Remove this ${s.kind === "branch" ? "decision" : s.kind}" aria-label="Remove ${esc(s.name||s.kind)}">&#215;</button>`;
+/** The hover-revealed reorder/remove affordances carried by every node in the plan tree.
+    Reordering is within the node's own list, so a step never jumps in or out of a branch. */
+function nodeBtns(s, i, n){
+  const what = s.kind === "branch" ? "decision" : s.kind;
+  const nm = esc(s.name || s.kind);
+  const ord = (d, glyph, word) => `<button class="ord" data-mv-step="${esc(s.id)}" data-d="${d}" type="button"
+    ${(d < 0 ? i === 0 : i === n-1) ? "disabled" : ""}
+    title="Move this ${what} ${word}" aria-label="Move ${nm} ${word}">${glyph}</button>`;
+  return ord(-1, "&#9650;", "up") + ord(1, "&#9660;", "down") +
+    `<button class="rm" data-del-step="${esc(s.id)}" type="button"
+    title="Remove this ${what}" aria-label="Remove ${nm}">&#215;</button>`;
 }
 /**
  * Remove a step from wherever it sits in the tree. Dropping a decision drops the
@@ -1170,11 +1181,18 @@ function renderRightPane(){
 
 /* A pane repaints by replacing its whole innerHTML, which throws away the input
    the user was typing into — one keystroke per re-render, and no way to type a
-   decimal point. Note where the caret was, repaint, then put it back. */
+   decimal point. Note where the caret was, repaint, then put it back.
+
+   This is why the numeric boxes are `type="text" inputmode="decimal"` and not
+   `type="number"`: the selection API does not apply to a number input, so the
+   caret could never be read or put back and every repaint dropped it at index 0
+   — which typed "180" as "081". `.num` keeps the monospace figures, and the
+   Up/Down keys are re-implemented over `data-step` at the bottom of the file. */
 function focusKey(a){
   if(!a || !/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return null;
   if(a.id) return "#" + CSS.escape(a.id);
-  const cls = String(a.className || "").split(/\s+/).filter(Boolean)[0];
+  // "num"/"mono" say how a box looks, not which one it is — they would match the first
+  const cls = String(a.className || "").split(/\s+/).filter(c => c && c !== "num" && c !== "mono")[0];
   if(!cls) return null;
   const box = a.closest("[data-si]");
   const vi  = a.dataset && a.dataset.vi != null ? `[data-vi="${a.dataset.vi}"]` : "";
@@ -1182,7 +1200,7 @@ function focusKey(a){
 }
 function caretOf(a){
   try{ return a.selectionStart == null ? null : [a.selectionStart, a.selectionEnd]; }
-  catch(e){ return null; }   // number inputs throw on .selectionStart in some browsers
+  catch(e){ return null; }   // a type the selection API skips, e.g. a range slider
 }
 function withFocus(root, paint){
   const a = document.activeElement;
@@ -1209,9 +1227,9 @@ function renderInspector(){
         <input type="text" id="mName" value="${esc(model.name)}"></div>
       <div class="field"><label>Start pose</label>
         <div class="row3">
-          <input type="number" id="sX" step="0.5" value="${r2(model.startPose.x)}" aria-label="start x">
-          <input type="number" id="sY" step="0.5" value="${r2(model.startPose.y)}" aria-label="start y">
-          <input type="number" id="sH" step="5" value="${r2(model.startPose.h)}" aria-label="start heading">
+          <input type="text" inputmode="decimal" class="num" id="sX" data-step="0.5" value="${r2(model.startPose.x)}" aria-label="start x">
+          <input type="text" inputmode="decimal" class="num" id="sY" data-step="0.5" value="${r2(model.startPose.y)}" aria-label="start y">
+          <input type="text" inputmode="decimal" class="num" id="sH" data-step="5" value="${r2(model.startPose.h)}" aria-label="start heading">
         </div></div>
       <div class="hint">x, y, heading° — also typable above the field. G304: start touching the perimeter wall, inside your own half, clear of the LOADING ZONE.</div>
       <div class="divider"></div>
@@ -1230,20 +1248,20 @@ function renderInspector(){
       <div class="divider"></div>
       <div class="eyebrow" style="display:block;margin-bottom:8px">Robot &amp; drivetrain</div>
       <div class="row2">
-        <div class="field"><label>Width in</label><input type="number" id="rW" step="0.5" value="${model.robot.w}"></div>
-        <div class="field"><label>Length in</label><input type="number" id="rH" step="0.5" value="${model.robot.h}"></div>
+        <div class="field"><label>Width in</label><input type="text" inputmode="decimal" class="num" id="rW" data-step="0.5" value="${model.robot.w}"></div>
+        <div class="field"><label>Length in</label><input type="text" inputmode="decimal" class="num" id="rH" data-step="0.5" value="${model.robot.h}"></div>
       </div>
       <div class="row2">
-        <div class="field"><label>Motor RPM</label><input type="number" id="rRpm" step="1" value="${model.robot.motorRpm}"></div>
-        <div class="field"><label>Wheel Ø in</label><input type="number" id="rDia" step="0.01" value="${model.robot.wheelDia}"></div>
+        <div class="field"><label>Motor RPM</label><input type="text" inputmode="decimal" class="num" id="rRpm" data-step="1" value="${model.robot.motorRpm}"></div>
+        <div class="field"><label>Wheel Ø in</label><input type="text" inputmode="decimal" class="num" id="rDia" data-step="0.01" value="${model.robot.wheelDia}"></div>
       </div>
       <div class="hint">Free speed off the motor's spec sheet — a goBILDA 5203 is 435 rpm at 13.7:1, 312 at 19.2:1.
         104 mm mecanums measure 4.09 in, 96 mm ones 3.78 in.</div>
       <div class="row2">
-        <div class="field"><label>Extra reduction</label><input type="number" id="rGear" step="0.1" value="${model.robot.gearRatio}"></div>
-        <div class="field"><label>Mass lb</label><input type="number" id="rMass" step="1" value="${model.robot.massLb}"></div>
+        <div class="field"><label>Extra reduction</label><input type="text" inputmode="decimal" class="num" id="rGear" data-step="0.1" value="${model.robot.gearRatio}"></div>
+        <div class="field"><label>Mass lb</label><input type="text" inputmode="decimal" class="num" id="rMass" data-step="1" value="${model.robot.massLb}"></div>
       </div>
-      <div class="field"><label>Drivetrain efficiency %</label><input type="number" id="rEff" step="1" value="${model.robot.eff}"></div>
+      <div class="field"><label>Drivetrain efficiency %</label><input type="text" inputmode="decimal" class="num" id="rEff" data-step="1" value="${model.robot.eff}"></div>
       <div class="hint">Reduction between the motor and the wheel on top of the gearbox — 1 for a direct drive.
         Efficiency is the knob to calibrate: pull it down until the timings match a real run.</div>
       <div class="kv">
@@ -1276,8 +1294,8 @@ function renderInspector(){
   if(s.kind === "move"){
     const h = s.heading;
     body += `<div class="field"><label>End point</label><div class="row2">
-        <input type="number" id="eX" step="0.5" value="${r2(s.end.x)}" aria-label="end x">
-        <input type="number" id="eY" step="0.5" value="${r2(s.end.y)}" aria-label="end y"></div></div>
+        <input type="text" inputmode="decimal" class="num" id="eX" data-step="0.5" value="${r2(s.end.x)}" aria-label="end x">
+        <input type="text" inputmode="decimal" class="num" id="eY" data-step="0.5" value="${r2(s.end.y)}" aria-label="end y"></div></div>
       <div class="field"><label>Control points</label>
         <select id="nCtrl">
           <option value="0"${s.ctrl.length===0?" selected":""}>0 — straight line</option>
@@ -1286,18 +1304,18 @@ function renderInspector(){
         </select></div>`;
     s.ctrl.forEach((c,i) => {
       body += `<div class="field"><label>Control ${i+1}</label><div class="row2">
-        <input type="number" class="cX" data-i="${i}" step="0.5" value="${r2(c.x)}" aria-label="control ${i+1} x">
-        <input type="number" class="cY" data-i="${i}" step="0.5" value="${r2(c.y)}" aria-label="control ${i+1} y"></div></div>`;
+        <input type="text" inputmode="decimal" class="cX num" data-i="${i}" data-step="0.5" value="${r2(c.x)}" aria-label="control ${i+1} x">
+        <input type="text" inputmode="decimal" class="cY num" data-i="${i}" data-step="0.5" value="${r2(c.y)}" aria-label="control ${i+1} y"></div></div>`;
     });
     const it = active && active.items.find(i => i.kind==="move" && i.step.id===s.id);
     body += `<div class="field"><label>Heading</label><select id="hMode">
       ${HEADING_MODES.map(m=>`<option value="${m.id}"${h.mode===m.id?" selected":""}>${m.label}</option>`).join("")}</select></div>`;
     if(h.mode === "constant")
-      body += `<div class="field"><label>Angle °</label><input type="number" id="hDeg" step="5" value="${r2(h.deg||0)}"></div>`;
+      body += `<div class="field"><label>Angle °</label><input type="text" inputmode="decimal" class="num" id="hDeg" data-step="5" value="${r2(h.deg||0)}"></div>`;
     if(h.mode === "linear")
       body += `<div class="field"><label>Start ° → end °</label><div class="row2">
-        <input type="number" value="${it ? r2(it.startPose.h) : ""}" disabled aria-label="start heading, carried from the previous step">
-        <input type="number" id="hE" step="5" value="${r2(h.endDeg||0)}" aria-label="end heading"></div></div>
+        <input type="text" inputmode="decimal" class="num" value="${it ? r2(it.startPose.h) : ""}" disabled aria-label="start heading, carried from the previous step">
+        <input type="text" inputmode="decimal" class="num" id="hE" data-step="5" value="${r2(h.endDeg||0)}" aria-label="end heading"></div></div>
         <div class="hint">Starts from the heading the step before it ends on${it ? "" : " \u2014 shown once a simulated route reaches this step"}.</div>`;
     if(it) body += `<div class="note"><b>${fmt(it.length)} in</b> · <b>${fmt(it.time)}s</b> on the active branch.</div>`;
     const aim = LANDMARKS.cells.filter(c => c.team === model.alliance);
@@ -1305,10 +1323,10 @@ function renderInspector(){
       <div class="addrow">${aim.map(c=>`<button class="btn tiny" data-aim="${c.x},${c.y}">${esc(c.label.replace(/^(RED|BLUE) /,""))}</button>`).join("")}</div></div>`;
   } else if(s.kind === "action"){
     body += `<div class="field"><label>Java method</label><input type="text" id="nMethod" value="${esc(s.method||"")}"></div>
-      <div class="field"><label>Duration ms</label><input type="number" id="nMs" step="100" value="${s.ms||0}"></div>
+      <div class="field"><label>Duration ms</label><input type="text" inputmode="decimal" class="num" id="nMs" data-step="100" value="${s.ms||0}"></div>
       <div class="hint">Exported as <span class="mono">instant(this::method)</span> followed by a wait.</div>`;
   } else if(s.kind === "wait"){
-    body += `<div class="field"><label>Duration ms</label><input type="number" id="nMs" step="100" value="${s.ms||0}"></div>`;
+    body += `<div class="field"><label>Duration ms</label><input type="text" inputmode="decimal" class="num" id="nMs" data-step="100" value="${s.ms||0}"></div>`;
   } else if(s.kind === "branch"){
     body += `<div class="field"><label>Decide on</label><select id="nState">
       ${model.states.map(st=>`<option value="${esc(st.id)}"${st.id===s.stateId?" selected":""}>${esc(st.name)}</option>`).join("")}</select></div>
@@ -1338,8 +1356,12 @@ function renderInspector(){
     }
     render();
   });
-  el.querySelectorAll(".cX").forEach(i => i.addEventListener("input", e => { s.ctrl[+e.target.dataset.i].x = +e.target.value; render(); }));
-  el.querySelectorAll(".cY").forEach(i => i.addEventListener("input", e => { s.ctrl[+e.target.dataset.i].y = +e.target.value; render(); }));
+  const ctrlBind = (cls, key) => el.querySelectorAll(cls).forEach(i => i.addEventListener("input", e => {
+    const v = parseFloat(e.target.value);       // an empty or half-typed box is not a move of the handle
+    if(isNaN(v)) return;
+    s.ctrl[+e.target.dataset.i][key] = v; render();
+  }));
+  ctrlBind(".cX", "x"); ctrlBind(".cY", "y");
   bind("#hMode","change", e => {
     const m = e.target.value, it = active && active.items.find(i=>i.step.id===s.id);
     s.heading = m === "constant" ? { mode:"constant", deg: it ? r2(it.endPose.h) : 0 }
@@ -1372,10 +1394,14 @@ function renderInspector(){
   });
 }
 function reid(s){ s.id = nid(s.kind[0]); if(s.kind==="branch") for(const c of s.cases) c.steps.forEach(reid); }
+/** Reorder within the step's own list. The pose threads forward, so swapping two
+    steps re-solves every move after them; playback is abandoned rather than left
+    pointing at a route that no longer exists. */
 function moveStep(f, d){
   const j = f.index + d;
   if(j < 0 || j >= f.list.length) return;
-  const [x] = f.list.splice(f.index,1); f.list.splice(j,0,x); render();
+  const [x] = f.list.splice(f.index,1); f.list.splice(j,0,x);
+  stopScrub(); render();
 }
 function bind(q, ev, fn){ const e = document.querySelector(q); if(e) e.addEventListener(ev, fn); }
 function numBind(q, fn){ bind(q, "input", e => { const v = parseFloat(e.target.value); if(!isNaN(v)){ fn(v); render(); } }); }
@@ -1845,6 +1871,8 @@ $("#field").addEventListener("pointercancel", () => { drag = null; });
 document.addEventListener("click", ev => {
   const rm = ev.target.closest("[data-del-step]");
   if(rm){ ev.stopPropagation(); deleteStep(rm.dataset.delStep); return; }
+  const ord = ev.target.closest("[data-mv-step]");
+  if(ord){ ev.stopPropagation(); const f = findStep(ord.dataset.mvStep); if(f) moveStep(f, +ord.dataset.d); return; }
   const chip = ev.target.closest("[data-state][data-val]");
   if(chip){ sim[chip.dataset.state] = chip.dataset.val; stopScrub(); render(); return; }
   const node = ev.target.closest("[data-sel]");
@@ -1886,6 +1914,7 @@ function startBind(q, key, tidy){
     const v = parseFloat(e.value);
     model.startPose[key] = isNaN(v) ? model.startPose[key] : tidy(v);
     render();
+    e.value = r2(model.startPose[key]);   // syncStartInputs skips the box being typed in
   });
 }
 startBind("#spX", "x", clampField);
@@ -1949,10 +1978,41 @@ $("#btnTheme").addEventListener("click", () => {
 });
 try{ const th = localStorage.getItem(STORE + ".theme"); if(th) document.documentElement.setAttribute("data-theme", th); }catch(e){}
 
+/* Up/Down nudge a `.num` box by the step it declares — the one thing worth keeping
+   from type="number", which the caret fix had to give up. */
+document.addEventListener("keydown", ev => {
+  const el = ev.target;
+  if(!el.classList || !el.classList.contains("num")) return;
+  if(ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
+  ev.preventDefault();
+  const stp = parseFloat(el.dataset.step) || 1, cur = parseFloat(el.value);
+  el.value = String(r2((isNaN(cur) ? 0 : cur) + (ev.key === "ArrowUp" ? stp : -stp)));
+  el.dispatchEvent(new Event("input",  { bubbles:true }));
+  el.dispatchEvent(new Event("change", { bubbles:true }));
+});
+
+/* A text box keeps whatever was typed in it, and the binders above quietly ignored
+   anything that was not a number. On the way out, show what the model actually took. */
+document.addEventListener("focusout", ev => {
+  const el = ev.target;
+  if(!el.classList || !el.classList.contains("num")) return;
+  const v = parseFloat(el.value);
+  if(!isNaN(v)){ el.value = String(r2(v)); return; }    // "12in" was read as 12
+  const rail = $(".rail.right");
+  if(!rail || !rail.contains(el)) return syncStartInputs();
+  // Nothing numeric left in the box, so repaint it from the model — but only once focus
+  // has landed outside the rail, since a repaint destroys the node it is heading for.
+  if(!(ev.relatedTarget && rail.contains(ev.relatedTarget))) renderRightPane();
+});
+
 document.addEventListener("keydown", ev => {
   if(/^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
   if(ev.key === "Escape"){ sel = null; render(); }
   if((ev.key === "Delete" || ev.key === "Backspace") && sel){ ev.preventDefault(); deleteStep(sel); }
+  if((ev.key === "ArrowUp" || ev.key === "ArrowDown") && sel && (ev.altKey || ev.metaKey)){
+    ev.preventDefault();
+    const f = findStep(sel); if(f) moveStep(f, ev.key === "ArrowUp" ? -1 : 1);
+  }
   if(ev.key === " "){ ev.preventDefault(); $("#btnPlay").click(); }
 });
 
