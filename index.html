@@ -136,6 +136,13 @@ button,input,select,textarea{font:inherit;color:inherit}
 .node .bd{flex:1;min-width:0}
 .node .t{font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .node .m{font-size:10.5px;color:var(--ink3)}
+.node .rm{
+  flex:none;width:17px;height:17px;padding:0;line-height:15px;text-align:center;font-size:12px;
+  border:1px solid transparent;border-radius:4px;background:none;color:var(--ink3);cursor:pointer;
+  opacity:0;transition:opacity .12s,color .12s,border-color .12s;
+}
+.node:hover .rm,.node.sel .rm,.node .rm:focus-visible{opacity:1}
+.node .rm:hover{color:var(--red);border-color:var(--red);background:var(--panel)}
 .kids{margin-left:11px;padding-left:9px;border-left:1px solid var(--line)}
 .caselab{
   display:flex;align-items:center;gap:6px;font-size:10px;font-family:Archivo;font-weight:700;
@@ -150,6 +157,12 @@ button,input,select,textarea{font:inherit;color:inherit}
 .stage{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--bg)}
 .stagetools{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .toggles{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+.toggles .btn[aria-pressed="true"]{border-color:var(--amber);color:var(--ink)}
+.toggles .btn[aria-pressed="false"]{color:var(--ink3)}
+.startin{display:flex;gap:5px;align-items:center}
+.startin label{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink3)}
+.startin input[type=number]{width:62px;padding:3px 6px;font-size:11.5px}
+.startin input[type=number]:focus{outline:2px solid var(--amber);outline-offset:-1px}
 .fieldwrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:14px;overflow:auto}
 #field{
   width:min(100%,calc(100vh - 250px));aspect-ratio:1/1;max-width:100%;
@@ -240,6 +253,7 @@ pre.code{
       <span class="v mono" id="budgetV">0.0s</span>
       <span style="font-size:11px;color:var(--ink3)">of 30 s</span>
     </div>
+    <button class="btn" id="btnMirror" title="Flip the whole plan onto the other alliance">Mirror plan</button>
     <button class="btn" id="btnReset" title="Reload the worked example">Example</button>
     <button class="btn" id="btnTheme" title="Switch light / dark">Theme</button>
   </header>
@@ -268,12 +282,17 @@ pre.code{
     <div class="stage">
       <div class="stagetools">
         <span class="eyebrow">Start pose</span>
-        <span class="mono" id="startReadout" style="font-size:11.5px"></span>
+        <div class="startin">
+          <label for="spX">x<input type="number" id="spX" step="0.5" aria-label="Start x, inches"></label>
+          <label for="spY">y<input type="number" id="spY" step="0.5" aria-label="Start y, inches"></label>
+          <label for="spH">&#952;<input type="number" id="spH" step="5" aria-label="Start heading, degrees"></label>
+        </div>
         <div class="toggles">
           <button class="btn tiny" id="tgGrid" aria-pressed="true">Grid</button>
           <button class="btn tiny" id="tgMarks" aria-pressed="true">Landmarks</button>
           <button class="btn tiny" id="tgGhost" aria-pressed="true">Other branches</button>
           <button class="btn tiny" id="tgRobot" aria-pressed="true">Robot</button>
+          <button class="btn tiny" id="tgMirror" aria-pressed="false" title="Overlay the same plan mirrored onto the other alliance">Mirror</button>
         </div>
       </div>
 
@@ -358,9 +377,10 @@ const nid = (p) => `${p}${(++uid).toString(36)}${Math.random().toString(36).slic
 
 function seedModel(){
   return {
-    version: 1,
+    version: 2,
     name: "RedHiveAuto",
     alliance: "red",
+    mirror: "mirrorPoint",
     robot: { w:16, h:16, maxVel:40, maxAccel:30, maxDecel:30, angVel:180 },
     startPose: { x:8.5, y:132, h:0 },
     states: [
@@ -478,6 +498,83 @@ function solveMove(step, pose, robot){
            time: Math.max(drive, turn) };
 }
 
+/* ===================== alliance mirror ===================== */
+/* One plan, both alliances. These are Pedro Pathing's own three mirrors, using the
+   same maths, so a plan mirrored here and an OpMode mirrored by a PoseFactory land
+   on exactly the same poses:
+
+     mirrorX(a)             x -> 2a - x,      heading -> 180 - heading
+     mirrorY(a)             y -> 2a - y,      heading -> -heading
+     mirrorAroundPoint(c)   x,y -> 2c - x,y,  heading -> heading + 180
+
+   The default is the point mirror about the field origin -- its centre, (70.75, 70.75)
+   in these corner-origin coordinates. That is the one that carries a routine from one
+   alliance side to the other, because the two halves of the field are a 180 degree
+   rotation of each other rather than a reflection. mirrorX is Pose.mirror(), kept for
+   fields whose halves really are mirror images. Each mode is its own inverse: applying
+   one twice gives the original plan back. */
+const MIRROR_AXIS = FIELD / 2;
+const MIRROR_MODES = [
+  { id:"mirrorPoint", call:`.mirrorAroundPoint(${MIRROR_AXIS}, ${MIRROR_AXIS})`,
+    label:"mirrorAroundPoint \u2014 180\u00b0 about the field origin" },
+  { id:"mirrorX", call:`.mirrorX(${MIRROR_AXIS})`,
+    label:"mirrorX \u2014 across the x centreline (Pedro .mirror())" },
+  { id:"mirrorY", call:`.mirrorY(${MIRROR_AXIS})`,
+    label:"mirrorY \u2014 across the y centreline" }
+];
+const LEGACY_MIRROR = { flipX:"mirrorX", flipY:"mirrorY", rotate:"mirrorPoint" };
+function mirrorModeOf(m){
+  const id = m && (LEGACY_MIRROR[m.mirror] || m.mirror);
+  return MIRROR_MODES.some(x => x.id === id) ? id : "mirrorPoint";
+}
+const mirrorModeById = (id) => MIRROR_MODES.find(x => x.id === id) || MIRROR_MODES[0];
+const m2 = (n) => Math.round(n*100)/100;
+
+function mirrorXY(p, mode){
+  return mode === "mirrorX" ? { x: m2(FIELD - p.x), y: m2(p.y) }
+       : mode === "mirrorY" ? { x: m2(p.x),         y: m2(FIELD - p.y) }
+       :                      { x: m2(FIELD - p.x), y: m2(FIELD - p.y) };
+}
+function mirrorDeg(h, mode){
+  const a = norm180(mode === "mirrorX" ? 180 - h : mode === "mirrorY" ? -h : h + 180);
+  return m2(a === -180 ? 180 : a);
+}
+function mirrorSteps(list, mode){
+  return (list||[]).map(s => {
+    const c = { ...s };
+    if(s.kind === "move"){
+      c.end  = mirrorXY(s.end, mode);
+      c.ctrl = (s.ctrl||[]).map(pt => mirrorXY(pt, mode));
+      const h = { ...s.heading };
+      if(h.mode === "constant") h.deg = mirrorDeg(h.deg||0, mode);
+      if(h.mode === "linear"){ h.startDeg = mirrorDeg(h.startDeg||0, mode); h.endDeg = mirrorDeg(h.endDeg||0, mode); }
+      c.heading = h;   // tangent modes follow the mirrored curve on their own
+    } else if(s.kind === "branch"){
+      c.cases = (s.cases||[]).map(cs => ({ ...cs, steps: mirrorSteps(cs.steps, mode) }));
+    }
+    return c;
+  });
+}
+/** Swap Red <-> Blue inside an autonomous name so the two OpModes don't collide. */
+function swapAllianceWord(name){
+  return String(name||"").replace(/red|blue/gi, w => {
+    const to = /^r/i.test(w) ? "blue" : "red";
+    if(w === w.toUpperCase()) return to.toUpperCase();
+    if(w[0] === w[0].toUpperCase()) return to[0].toUpperCase() + to.slice(1);
+    return to;
+  });
+}
+/** The same plan, played from the other side of the field. Step ids are kept. */
+function mirrorPlan(m, mode){
+  mode = mode || mirrorModeOf(m);
+  const out = JSON.parse(JSON.stringify(m));
+  out.startPose = { ...mirrorXY(m.startPose, mode), h: mirrorDeg(m.startPose.h||0, mode) };
+  out.steps     = mirrorSteps(m.steps, mode);
+  out.alliance  = m.alliance === "red" ? "blue" : "red";
+  out.name      = swapAllianceWord(m.name);
+  return out;
+}
+
 /* ===================== route enumeration ===================== */
 /** Every branch combination reachable from the plan, with poses + timing baked in. */
 function enumerateRoutes(model){
@@ -539,9 +636,10 @@ let model = loadModel();
 let sim = defaultSim(model);
 let sel = null;
 let tab = "step";
-let show = { grid:true, marks:true, ghost:true, robot:true };
+let show = { grid:true, marks:true, ghost:true, robot:true, mirror:false };
 let scrubFrac = 0, playing = false, playT0 = 0;
 let R = { routes:[], truncated:false }, active = null;
+let MR = null;   // the mirrored plan + its routes, while the overlay is on
 const listReg = [];
 
 function defaultSim(m){
@@ -552,9 +650,15 @@ function defaultSim(m){
 function loadModel(){
   try{
     const raw = localStorage.getItem(STORE);
-    if(raw){ const m = JSON.parse(raw); if(m && m.steps) return m; }
+    if(raw){ const m = JSON.parse(raw); if(m && m.steps) return migrate(m); }
   }catch(e){}
   return seedModel();
+}
+/** v2 made the alliance mirror a point mirror about the field origin, which is the
+    one that carries a plan between alliance sides. */
+function migrate(m){
+  if(!(m.version >= 2)){ m.mirror = "mirrorPoint"; m.version = 2; }
+  return m;
 }
 function save(){ try{ localStorage.setItem(STORE, JSON.stringify(model)); }catch(e){} }
 
@@ -584,6 +688,9 @@ function render(){
 
   R = enumerateRoutes(model);
   active = R.routes.find(rt => routeMatches(rt, sim)) || R.routes[0] || null;
+  // solved here rather than in renderField, which also runs on every playback frame
+  if(show.mirror){ const mm = mirrorPlan(model); MR = { plan:mm, routes:enumerateRoutes(mm).routes }; }
+  else MR = null;
 
   renderStateSim();
   renderTree();
@@ -597,11 +704,18 @@ function renderTop(){
   const t = active ? active.time : 0;
   $("#budgetV").textContent = fmt(t) + "s";
   $("#budget").classList.toggle("over", t > AUTO_LIMIT);
-  $("#startReadout").textContent = `x ${r2(model.startPose.x)}  y ${r2(model.startPose.y)}  θ ${r2(model.startPose.h)}°`;
+  syncStartInputs();
   const nSteps = countSteps(model.steps);
   $("#planCount").textContent = `${nSteps} steps · ${R.routes.length} route${R.routes.length===1?"":"s"}`;
   document.querySelectorAll("#allianceSeg button").forEach(b =>
     b.setAttribute("aria-pressed", String(b.dataset.v === model.alliance)));
+}
+/** Push the model's start pose into the toolbar boxes, leaving alone whichever
+    one is being typed into so a re-render can't yank the value out from under it. */
+function syncStartInputs(){
+  const live = document.activeElement;
+  const put = (q, v) => { const e = $(q); if(e && e !== live) e.value = r2(v); };
+  put("#spX", model.startPose.x); put("#spY", model.startPose.y); put("#spH", model.startPose.h);
 }
 function countSteps(list){
   let n = 0;
@@ -646,7 +760,8 @@ function renderNode(s, isLive, live){
     const head = `<div class="node branch${selc}${on?"":" dead"}" data-sel="${esc(s.id)}">
         <span class="ic">&#9670;</span>
         <div class="bd"><div class="t">${esc(s.name || "Decision")}</div>
-        <div class="m mono">${st ? esc(st.varName) : "⚠ missing state"}</div></div></div>`;
+        <div class="m mono">${st ? esc(st.varName) : "⚠ missing state"}</div></div>
+        ${rmBtn(s)}</div>`;
     const kids = (s.cases||[]).map(c => {
       const v = st && st.values.find(v=>v.id===c.valueId);
       const caseLive = on && live.has(s.id+"::"+c.valueId);
@@ -661,7 +776,31 @@ function renderNode(s, isLive, live){
              : `${s.ms||0} ms`;
   return `<div class="node ${s.kind}${selc}${on?"":" dead"}" data-sel="${esc(s.id)}">
       <span class="ic">${ic}</span>
-      <div class="bd"><div class="t">${esc(s.name||s.kind)}</div><div class="m mono">${meta}</div></div></div>`;
+      <div class="bd"><div class="t">${esc(s.name||s.kind)}</div><div class="m mono">${meta}</div></div>
+      ${rmBtn(s)}</div>`;
+}
+/** The hover-revealed remove affordance carried by every node in the plan tree. */
+function rmBtn(s){
+  return `<button class="rm" data-del-step="${esc(s.id)}" type="button"
+    title="Remove this ${s.kind === "branch" ? "decision" : s.kind}" aria-label="Remove ${esc(s.name||s.kind)}">&#215;</button>`;
+}
+/**
+ * Remove a step from wherever it sits in the tree. Dropping a decision drops the
+ * steps nested under every one of its cases, so that one asks first.
+ */
+function deleteStep(id){
+  const f = findStep(id);
+  if(!f) return;
+  const s = f.step;
+  if(s.kind === "branch"){
+    const n = countSteps(s.cases.reduce((a,c) => a.concat(c.steps), []));
+    if(n && !confirm(`Remove "${s.name || "this decision"}" and the ${n} step${n===1?"":"s"} planned under it?`)) return;
+  }
+  f.list.splice(f.index, 1);
+  if(sel === id) sel = null;
+  scrubFrac = 0;
+  render();
+  toast((s.name || s.kind) + " removed");
 }
 
 /* ===================== center: field ===================== */
@@ -694,6 +833,25 @@ function renderField(){
     }
   }
   g.push(`<g>${ghost.join("")}</g>`);
+
+  // the same plan on the other alliance, to sanity-check it against the far side
+  if(MR){
+    const mm = MR.plan;
+    const col = mm.alliance === "red" ? "var(--red)" : "var(--blue)";
+    const seen = new Set(), mg = [];
+    for(const rt of MR.routes) for(const it of rt.items){
+      if(it.kind !== "move") continue;
+      const k = it.step.id + "|" + r2(it.startPose.x) + "," + r2(it.startPose.y);
+      if(seen.has(k)) continue; seen.add(k);
+      mg.push(`<polyline points="${poly(it.s.pts)}" fill="none" stroke="${col}" stroke-width="0.6"
+        stroke-opacity="0.6" stroke-dasharray="2.6 1.6" stroke-linecap="round"/>`);
+    }
+    const ms = mm.startPose;
+    const mhx = ms.x + Math.cos(ms.h*Math.PI/180)*7, mhy = ms.y + Math.sin(ms.h*Math.PI/180)*7;
+    mg.push(`<circle cx="${ms.x}" cy="${fy(ms.y)}" r="1.6" fill="none" stroke="${col}" stroke-width="0.5"/>
+      <line x1="${ms.x}" y1="${fy(ms.y)}" x2="${mhx}" y2="${fy(mhy)}" stroke="${col}" stroke-width="0.45" stroke-opacity="0.8"/>`);
+    g.push(`<g pointer-events="none">${mg.join("")}</g>`);
+  }
 
   if(active){
     // branch markers
@@ -827,10 +985,43 @@ function renderRightPane(){
     p.hidden = t !== tab;
   });
   document.querySelectorAll(".tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
-  if(tab === "step")   renderInspector();
-  if(tab === "states") renderStatesPane();
-  if(tab === "routes") renderRoutesPane();
-  if(tab === "code")   renderCodePane();
+  withFocus($(".rail.right"), () => {
+    if(tab === "step")   renderInspector();
+    if(tab === "states") renderStatesPane();
+    if(tab === "routes") renderRoutesPane();
+    if(tab === "code")   renderCodePane();
+  });
+}
+
+/* A pane repaints by replacing its whole innerHTML, which throws away the input
+   the user was typing into — one keystroke per re-render, and no way to type a
+   decimal point. Note where the caret was, repaint, then put it back. */
+function focusKey(a){
+  if(!a || !/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return null;
+  if(a.id) return "#" + CSS.escape(a.id);
+  const cls = String(a.className || "").split(/\s+/).filter(Boolean)[0];
+  if(!cls) return null;
+  const box = a.closest("[data-si]");
+  const vi  = a.dataset && a.dataset.vi != null ? `[data-vi="${a.dataset.vi}"]` : "";
+  return `${box ? `[data-si="${box.dataset.si}"] ` : ""}.${CSS.escape(cls)}${vi}`;
+}
+function caretOf(a){
+  try{ return a.selectionStart == null ? null : [a.selectionStart, a.selectionEnd]; }
+  catch(e){ return null; }   // number inputs throw on .selectionStart in some browsers
+}
+function withFocus(root, paint){
+  const a = document.activeElement;
+  const key = root && root.contains(a) ? focusKey(a) : null;
+  const caret = key ? caretOf(a) : null;
+  const typed = key && a.tagName !== "SELECT" ? a.value : null;
+  paint();
+  if(!key) return;
+  const back = root.querySelector(key);
+  if(!back) return;
+  back.focus();
+  // "8." and "8.50" both round-trip to 8 — keep what was typed, not the rounding
+  if(typed != null && back.value !== typed && parseFloat(back.value) === parseFloat(typed)) back.value = typed;
+  if(caret) try{ back.setSelectionRange(caret[0], caret[1]); }catch(e){}
 }
 
 function renderInspector(){
@@ -846,7 +1037,18 @@ function renderInspector(){
           <input type="number" id="sY" step="0.5" value="${r2(model.startPose.y)}" aria-label="start y">
           <input type="number" id="sH" step="5" value="${r2(model.startPose.h)}" aria-label="start heading">
         </div></div>
-      <div class="hint">x, y, heading°. G304: start touching the perimeter wall, inside your own half, clear of the LOADING ZONE.</div>
+      <div class="hint">x, y, heading° — also typable above the field. G304: start touching the perimeter wall, inside your own half, clear of the LOADING ZONE.</div>
+      <div class="divider"></div>
+      <div class="eyebrow" style="display:block;margin-bottom:8px">Alliance mirror</div>
+      <div class="field"><label>Mirror by</label>
+        <select id="mMode">${MIRROR_MODES.map(m =>
+          `<option value="${m.id}"${mirrorModeOf(model)===m.id?" selected":""}>${esc(m.label)}</option>`).join("")}</select></div>
+      <div class="hint">Pedro Pathing's own mirrors, matched exactly. Drives the <b>Mirror</b> overlay above the
+        field, the <b>Mirror plan</b> button, and the mirrored export in the Code tab, which can emit it as a
+        <span class="mono">PoseFactory${esc(mirrorModeById(mirrorModeOf(model)).call)}</span> call.
+        The default turns the plan 180° about the field origin, which is how one alliance side maps onto
+        the other — BIOBUZZ's LOADING ZONES, GARDENS and FLOWERS all pair up under it. The two reflections
+        are there for fields whose halves really are mirror images.</div>
       <div class="divider"></div>
       <div class="eyebrow" style="display:block;margin-bottom:8px">Robot &amp; motion</div>
       <div class="row2">
@@ -861,9 +1063,10 @@ function renderInspector(){
         <div class="field"><label>Max decel in/s²</label><input type="number" id="rD" step="1" value="${model.robot.maxDecel}"></div>
         <div class="field"><label>Turn rate °/s</label><input type="number" id="rR" step="10" value="${model.robot.angVel}"></div>
       </div>
-      <div class="note">Select a step in the plan to edit it, or drag a handle on the field. Timings are an estimate from this motion profile — tune them against a real run.</div>`;
+      <div class="note">Select a step in the plan to edit it, or drag a handle on the field. Remove a step with the × on its row, or Delete while it is selected. Timings are an estimate from this motion profile — tune them against a real run.</div>`;
     bind("#mName","input", e => { model.name = e.target.value; save(); });
     numBind("#sX", v => model.startPose.x = v); numBind("#sY", v => model.startPose.y = v); numBind("#sH", v => model.startPose.h = v);
+    bind("#mMode","change", e => { model.mirror = e.target.value; render(); });
     numBind("#rW", v => model.robot.w = v); numBind("#rH", v => model.robot.h = v);
     numBind("#rV", v => model.robot.maxVel = Math.max(1,v)); numBind("#rA", v => model.robot.maxAccel = Math.max(1,v));
     numBind("#rD", v => model.robot.maxDecel = Math.max(1,v)); numBind("#rR", v => model.robot.angVel = Math.max(1,v));
@@ -959,7 +1162,7 @@ function renderInspector(){
   el.querySelector("[data-dup]").addEventListener("click", () => {
     const copy = JSON.parse(JSON.stringify(s)); reid(copy); f.list.splice(f.index+1, 0, copy); sel = copy.id; render();
   });
-  el.querySelector("[data-del]").addEventListener("click", () => { f.list.splice(f.index,1); sel = null; render(); });
+  el.querySelector("[data-del]").addEventListener("click", () => deleteStep(s.id));
   bind("#nState","change", e => {
     s.stateId = e.target.value;
     const st = stateById(s.stateId);
@@ -1093,7 +1296,14 @@ function pascal(s, fallback){ const c = camel(s, fallback); return c[0].toUpperC
 function enumConst(s){ const v = String(s||"").toUpperCase().replace(/[^A-Z0-9_]/g,"_").replace(/^([0-9])/,"_$1"); return v || "CASE"; }
 const jnum = (n) => { const v = Math.round(n*1000)/1000; return Object.is(v,-0) ? "0" : String(v); };
 
-function generate(model){
+/**
+ * `opts.mirror` exports the plan for the other alliance the way Pedro does it:
+ * the poses keep their as-planned numbers and the mirror is chained onto the
+ * PoseFactory, so one set of coordinates serves both OpModes. Without it the
+ * caller passes an already-mirrored plan and the coordinates come out baked in.
+ */
+function generate(model, opts){
+  const mir = (opts && opts.mirror) || null;
   const used = new Set();
   const uniq = (base) => { let n = base, i = 2; while(used.has(n)) n = base + (i++); used.add(n); return n; };
   const byId = Object.fromEntries(model.states.map(s=>[s.id,s]));
@@ -1118,7 +1328,8 @@ function generate(model){
     const cp = step.ctrl.map((c,i) => pose(c.x, c.y, 0, base + "Ctrl" + (i+1)));
     const geom = cp.length ? `curve(${[sp, ...cp, ep].join(", ")})` : `line(${sp}, ${ep})`;
     const h = step.heading;
-    const head = h.mode === "constant"       ? `.constant(${jnum(h.deg||0)})`
+    // .constant(double) would slip past a mirrored factory; .constant(Pose) won't
+    const head = h.mode === "constant"       ? (mir ? `.constant(${sp})` : `.constant(${jnum(h.deg||0)})`)
                : h.mode === "linear"         ? `.linear(${sp}, ${ep})`
                : h.mode === "reverseTangent" ? `.reverseTangent()` : `.tangent()`;
     const name = uniq(base);
@@ -1181,7 +1392,7 @@ function generate(model){
   const rootParts = flow([{ list:model.steps, i:0 }], { ...model.startPose }, {});
 
   /* ---- assemble ---- */
-  const cls = pascal(model.name, "AutoPath");
+  const cls = pascal(mir ? mir.name : model.name, "AutoPath");
   const seq = (parts, ind) => parts.length
     ? `sequential(\n${parts.map(p => ind + "    " + p).join(",\n")}\n${ind})`
     : `sequential()`;
@@ -1220,7 +1431,9 @@ function generate(model){
     c.entries.map(e => `        cases.put(${c.type}.${e.c}, ${e.m}());`).join("\n") +
     `\n        return cases;\n    }`).join("\n\n");
 
-  const cells = LANDMARKS.cells.filter(c => c.team === model.alliance)
+  const alliance = mir ? mir.alliance : model.alliance;
+  const factory  = `PoseFactory.degrees()${mir ? mir.call : ""}`;
+  const cells = LANDMARKS.cells.filter(c => c.team === alliance)
     .map(c => `// ${c.label}: (${c.x}, ${c.y}) — AprilTag ${c.tags}`).join("\n");
 
   const routeSummary = R.routes.map(rt => {
@@ -1250,7 +1463,9 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 
 import java.util.EnumMap;
 
-// Generated by Hive Auto Planner — FTC BIOBUZZ (${model.alliance.toUpperCase()} alliance).
+// Generated by Hive Auto Planner — FTC BIOBUZZ (${alliance.toUpperCase()} alliance).${mir ?
+`\n// Poses are the as-planned ${model.alliance.toUpperCase()} coordinates; the PoseFactory below
+// mirrors them with ${mir.call.slice(1)}, the same transform Pose.mirror() applies.` : ""}
 // Estimated runtime per branch (30 s AUTO period):
 ${routeSummary}
 ${cells ? "\n" + cells + "\n" : ""}
@@ -1264,7 +1479,7 @@ ${suppliers}
 ${actionStubs ? "    // ---- Mechanisms -------------------------------------------------------\n" + actionStubs + "\n" : ""}
     // ---- Geometry ---------------------------------------------------------
     private Follower follower;
-    private final PoseFactory poseFactory = PoseFactory.degrees();
+    private final PoseFactory poseFactory = ${factory};
 
 ${poseFields}
 
@@ -1313,7 +1528,7 @@ import com.pedropathing.paths.Path;
 
 public class Paths {
 
-    private final PoseFactory poseFactory = PoseFactory.degrees();
+    private final PoseFactory poseFactory = ${factory};
 
 ${poseFields}
 
@@ -1323,14 +1538,36 @@ ${pathFns}
   return { java, pathsOnly };
 }
 
-let codeMode = "opmode";
+let codeMode = "opmode", codeSide = "plan", codeStyle = "factory";
 function renderCodePane(){
+  // "mirrored" exports the same plan for the other alliance, either by chaining the
+  // mirror onto the PoseFactory (Pedro's own way) or by baking the flipped numbers in.
+  const mode = mirrorModeById(mirrorModeOf(model));
+  const flipped = codeSide === "mirror" ? mirrorPlan(model) : null;
+  const viaFactory = !!flipped && codeStyle === "factory";
+  const src0 = viaFactory ? model : (flipped || model);
+  const opts = viaFactory ? { mirror: { call: mode.call, alliance: flipped.alliance, name: flipped.name } } : null;
   let out;
-  try{ out = generate(model); }
+  try{ out = generate(src0, opts); }
   catch(err){ $("#paneCode").innerHTML = `<div class="note">Could not generate code: ${esc(err.message)}</div>`; return; }
-  const src = codeMode === "json" ? JSON.stringify(model, null, 2)
+  const src = codeMode === "json" ? JSON.stringify(src0, null, 2)
             : codeMode === "paths" ? out.pathsOnly : out.java;
+  const other = model.alliance === "red" ? "blue" : "red";
   $("#paneCode").innerHTML = `
+    <div class="seg" style="margin-bottom:8px" id="codeSide">
+      <button data-a="plan" aria-pressed="${codeSide==="plan"}">${model.alliance.toUpperCase()} · as planned</button>
+      <button data-a="mirror" aria-pressed="${codeSide==="mirror"}">${other.toUpperCase()} · mirrored</button>
+    </div>
+    ${flipped ? `<div class="seg" style="margin-bottom:8px" id="codeStyle">
+      <button data-s="factory" aria-pressed="${codeStyle==="factory"}">Via PoseFactory</button>
+      <button data-s="baked" aria-pressed="${codeStyle==="baked"}">Baked coordinates</button>
+    </div>
+    <div class="hint" style="margin-top:0">${codeStyle==="factory"
+      ? `The poses keep their as-planned numbers and <span class="mono">${esc(mode.call.slice(1))}</span> does the
+         flip — the transform Pedro's <span class="mono">Pose.mirror()</span> applies. Constant headings go out as
+         <span class="mono">.constant(pose)</span> so the factory mirrors those too.`
+      : `Every pose is written out already flipped. Use this to read the numbers off, or to hand-tune the mirrored
+         side once it needs to differ from the plan.`}</div>` : ``}
     <div class="seg" style="margin-bottom:10px" id="codeSeg">
       <button data-m="opmode" aria-pressed="${codeMode==="opmode"}">OpMode</button>
       <button data-m="paths" aria-pressed="${codeMode==="paths"}">Paths</button>
@@ -1346,6 +1583,9 @@ function renderCodePane(){
       branch carries its own poses. Fill in the <span class="mono">TODO</span> readers and mechanism methods.</div>`:``}
     <pre class="code" id="codeOut">${esc(src)}</pre>`;
   $("#codeSeg").querySelectorAll("button").forEach(b => b.addEventListener("click", () => { codeMode = b.dataset.m; renderCodePane(); }));
+  $("#codeSide").querySelectorAll("button").forEach(b => b.addEventListener("click", () => { codeSide = b.dataset.a; renderCodePane(); }));
+  const styleSeg = $("#codeStyle");
+  if(styleSeg) styleSeg.querySelectorAll("button").forEach(b => b.addEventListener("click", () => { codeStyle = b.dataset.s; renderCodePane(); }));
   $("#btnCopy").addEventListener("click", async () => {
     try{ await navigator.clipboard.writeText(src); toast("Copied to clipboard"); }
     catch(e){
@@ -1360,6 +1600,7 @@ function renderCodePane(){
     try{
       const m = JSON.parse(t);
       if(!m.steps || !m.states) throw new Error("that isn't a plan");
+      codeSide = "plan";
       model = m; sim = defaultSim(model); sel = null; scrubFrac = 0; render(); toast("Plan loaded");
     }catch(e){ toast("Couldn't read that: " + e.message); }
   });
@@ -1404,6 +1645,8 @@ $("#field").addEventListener("pointerup", ev => { drag = null; try{ $("#field").
 $("#field").addEventListener("pointercancel", () => { drag = null; });
 
 document.addEventListener("click", ev => {
+  const rm = ev.target.closest("[data-del-step]");
+  if(rm){ ev.stopPropagation(); deleteStep(rm.dataset.delStep); return; }
   const chip = ev.target.closest("[data-state][data-val]");
   if(chip){ sim[chip.dataset.state] = chip.dataset.val; scrubFrac = 0; render(); return; }
   const node = ev.target.closest("[data-sel]");
@@ -1431,13 +1674,43 @@ function addStep(kind, list){
   list.push(s); sel = s.id; tab = "step"; render();
 }
 
+/* Toolbar start pose. Typing updates the model on every keystroke so the field
+   tracks it live; the value is only clamped and normalised once the box is left,
+   so a half-typed "-" or "1" of "180" isn't rewritten mid-entry. */
+const clampField = (v) => Math.max(0, Math.min(FIELD, m2(v)));
+function startBind(q, key, tidy){
+  const e = $(q); if(!e) return;
+  e.addEventListener("input", () => {
+    const v = parseFloat(e.value);
+    if(!isNaN(v)){ model.startPose[key] = v; render(); }
+  });
+  e.addEventListener("change", () => {
+    const v = parseFloat(e.value);
+    model.startPose[key] = isNaN(v) ? model.startPose[key] : tidy(v);
+    render();
+  });
+}
+startBind("#spX", "x", clampField);
+startBind("#spY", "y", clampField);
+startBind("#spH", "h", v => { const a = norm180(v); return m2(a === -180 ? 180 : a); });
+
 document.querySelectorAll("#allianceSeg button").forEach(b => b.addEventListener("click", () => {
   model.alliance = b.dataset.v; render();
 }));
-const tg = (id, key) => $(id).addEventListener("click", () => {
-  show[key] = !show[key]; $(id).setAttribute("aria-pressed", String(show[key])); renderField();
+
+/* Mirroring is an involution, so this same button flips the plan back. */
+$("#btnMirror").addEventListener("click", () => {
+  const to = model.alliance === "red" ? "BLUE" : "RED";
+  model = mirrorPlan(model);
+  sel = null; scrubFrac = 0; render();
+  toast(`Plan mirrored to ${to} — press Mirror plan again to flip it back`);
+});
+const tg = (id, key, full) => $(id).addEventListener("click", () => {
+  show[key] = !show[key]; $(id).setAttribute("aria-pressed", String(show[key]));
+  (full ? render : renderField)();
 });
 tg("#tgGrid","grid"); tg("#tgMarks","marks"); tg("#tgGhost","ghost"); tg("#tgRobot","robot");
+tg("#tgMirror","mirror", true);   // the overlay's routes are solved in render()
 
 $("#scrub").addEventListener("input", e => { scrubFrac = +e.target.value/1000; playing = false; $("#btnPlay").textContent = "Play"; renderField(); renderTimeline(); });
 $("#btnPlay").addEventListener("click", () => {
@@ -1470,6 +1743,7 @@ try{ const th = localStorage.getItem(STORE + ".theme"); if(th) document.document
 document.addEventListener("keydown", ev => {
   if(/^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
   if(ev.key === "Escape"){ sel = null; render(); }
+  if((ev.key === "Delete" || ev.key === "Backspace") && sel){ ev.preventDefault(); deleteStep(sel); }
   if(ev.key === " "){ ev.preventDefault(); $("#btnPlay").click(); }
 });
 
