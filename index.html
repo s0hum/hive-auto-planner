@@ -637,7 +637,10 @@ let sim = defaultSim(model);
 let sel = null;
 let tab = "step";
 let show = { grid:true, marks:true, ghost:true, robot:true, mirror:false };
-let scrubFrac = 0, playing = false, playT0 = 0;
+let scrubFrac = 0, playing = false, playT0 = 0, playRun = 0;
+/** Rewind the transport to the start of the route, stopping playback with it, so
+    an edit can never leave the frame loop running against a stale `playT0`. */
+function stopScrub(){ scrubFrac = 0; if(playing) setPlaying(false); }
 let R = { routes:[], truncated:false }, active = null;
 let MR = null;   // the mirrored plan + its routes, while the overlay is on
 const listReg = [];
@@ -798,7 +801,7 @@ function deleteStep(id){
   }
   f.list.splice(f.index, 1);
   if(sel === id) sel = null;
-  scrubFrac = 0;
+  stopScrub();
   render();
   toast((s.name || s.kind) + " removed");
 }
@@ -901,16 +904,22 @@ function renderField(){
   g.push(`<circle cx="${hx}" cy="${fy(hy)}" r="1.5" fill="none" stroke="var(--blue)" stroke-width="0.5"
      data-drag="startH" style="cursor:grab"/>`);
 
-  // robot at scrub position
-  if(show.robot && active){
-    const p = poseAtFrac(active, scrubFrac);
-    if(p){
-      g.push(robotShape(p, "var(--amber)", 0.7, 0.13));
-      const ax = p.x + Math.cos(p.h*Math.PI/180)*7, ay = p.y + Math.sin(p.h*Math.PI/180)*7;
-      g.push(`<line x1="${p.x}" y1="${fy(p.y)}" x2="${ax}" y2="${fy(ay)}" stroke="var(--amber)" stroke-width="0.6"/>`);
-    }
-  }
-  svg.innerHTML = g.join("");
+  /* Everything above holds still for the length of a playback run, so it lives in its
+     own layer and only #fieldRobot is rewritten per frame. Rebuilding the whole SVG
+     each frame re-inserted the 60 KB field image, and the browser re-decodes that
+     image on every insert -- which is what made Play crawl and the field strobe. */
+  svg.innerHTML = `<g id="fieldStatic">${g.join("")}</g><g id="fieldRobot"></g>`;
+  renderRobot();
+}
+/** The robot at the scrub position -- the only part of the field playback redraws. */
+function renderRobot(){
+  const layer = $("#fieldRobot");
+  if(!layer) return;
+  const p = show.robot && active ? poseAtFrac(active, scrubFrac) : null;
+  if(!p){ layer.innerHTML = ""; return; }
+  const ax = p.x + Math.cos(p.h*Math.PI/180)*7, ay = p.y + Math.sin(p.h*Math.PI/180)*7;
+  layer.innerHTML = robotShape(p, "var(--amber)", 0.7, 0.13)
+    + `<line x1="${p.x}" y1="${fy(p.y)}" x2="${ax}" y2="${fy(ay)}" stroke="var(--amber)" stroke-width="0.6"/>`;
 }
 const fy = (y) => FIELD - y;
 const poly = (pts) => pts.map(p => `${r2(p.x)},${r2(fy(p.y))}`).join(" ");
@@ -973,6 +982,7 @@ function renderTimeline(){
     ? `<span class="t-bad">${fmt(active.time)}s — ${fmt(active.time-AUTO_LIMIT)}s over</span>`
     : `<span class="t-ok">${fmt(active.time)}s</span>`;
   $("#scrubT").textContent = `${fmt(scrubFrac*active.time)}s / ${fmt(active.time)}s`;
+  $("#scrub").value = Math.round(scrubFrac*1000);   // keeps the thumb honest after a rewind
 }
 </script>
 
@@ -1270,7 +1280,7 @@ function renderRoutesPane(){
     ${R.truncated?`<div class="hint" style="margin-top:10px">Showing the first ${MAX_ROUTES} routes.</div>`:""}`;
   $("#paneRoutes").querySelectorAll("tr[data-route]").forEach(tr => tr.addEventListener("click", () => {
     const rt = R.routes[+tr.dataset.route];
-    sim = { ...sim, ...rt.assign }; scrubFrac = 0; render();
+    sim = { ...sim, ...rt.assign }; stopScrub(); render();
   }));
 }
 </script>
@@ -1601,7 +1611,7 @@ function renderCodePane(){
       const m = JSON.parse(t);
       if(!m.steps || !m.states) throw new Error("that isn't a plan");
       codeSide = "plan";
-      model = m; sim = defaultSim(model); sel = null; scrubFrac = 0; render(); toast("Plan loaded");
+      model = m; sim = defaultSim(model); sel = null; stopScrub(); render(); toast("Plan loaded");
     }catch(e){ toast("Couldn't read that: " + e.message); }
   });
 }
@@ -1648,7 +1658,7 @@ document.addEventListener("click", ev => {
   const rm = ev.target.closest("[data-del-step]");
   if(rm){ ev.stopPropagation(); deleteStep(rm.dataset.delStep); return; }
   const chip = ev.target.closest("[data-state][data-val]");
-  if(chip){ sim[chip.dataset.state] = chip.dataset.val; scrubFrac = 0; render(); return; }
+  if(chip){ sim[chip.dataset.state] = chip.dataset.val; stopScrub(); render(); return; }
   const node = ev.target.closest("[data-sel]");
   if(node){ sel = sel === node.dataset.sel ? null : node.dataset.sel; tab = "step"; render(); return; }
   const add = ev.target.closest("[data-add]");
@@ -1702,7 +1712,7 @@ document.querySelectorAll("#allianceSeg button").forEach(b => b.addEventListener
 $("#btnMirror").addEventListener("click", () => {
   const to = model.alliance === "red" ? "BLUE" : "RED";
   model = mirrorPlan(model);
-  sel = null; scrubFrac = 0; render();
+  sel = null; stopScrub(); render();
   toast(`Plan mirrored to ${to} — press Mirror plan again to flip it back`);
 });
 const tg = (id, key, full) => $(id).addEventListener("click", () => {
@@ -1712,24 +1722,35 @@ const tg = (id, key, full) => $(id).addEventListener("click", () => {
 tg("#tgGrid","grid"); tg("#tgMarks","marks"); tg("#tgGhost","ghost"); tg("#tgRobot","robot");
 tg("#tgMirror","mirror", true);   // the overlay's routes are solved in render()
 
-$("#scrub").addEventListener("input", e => { scrubFrac = +e.target.value/1000; playing = false; $("#btnPlay").textContent = "Play"; renderField(); renderTimeline(); });
-$("#btnPlay").addEventListener("click", () => {
-  playing = !playing;
-  $("#btnPlay").textContent = playing ? "Pause" : "Play";
-  if(playing){ if(scrubFrac >= 0.999) scrubFrac = 0; playT0 = performance.now() - scrubFrac * (active?active.time:1) * 1000; requestAnimationFrame(tick); }
+$("#scrub").addEventListener("input", e => {
+  setPlaying(false);
+  scrubFrac = +e.target.value/1000;
+  renderRobot(); renderTimeline();
 });
-function tick(now){
-  if(!playing || !active) return;
+$("#btnPlay").addEventListener("click", () => setPlaying(!playing));
+/* `playRun` fences the frame loop: a Pause/Play pair started a second loop while the
+   first was still queued, and the two then fought over scrubFrac. Only the newest run
+   keeps drawing. */
+function setPlaying(on){
+  playing = on && !!active && active.time > 0;
+  $("#btnPlay").textContent = playing ? "Pause" : "Play";
+  if(!playing) return;
+  if(scrubFrac >= 0.999) scrubFrac = 0;
   const total = Math.max(0.001, active.time);
-  scrubFrac = Math.min(1, (now - playT0)/1000/total);
-  $("#scrub").value = Math.round(scrubFrac*1000);
-  renderField(); renderTimeline();
-  if(scrubFrac >= 1){ playing = false; $("#btnPlay").textContent = "Play"; return; }
-  requestAnimationFrame(tick);
+  playT0 = performance.now() - scrubFrac * total * 1000;
+  const run = ++playRun;
+  requestAnimationFrame(function tick(now){
+    if(!playing || run !== playRun || !active) return;
+    scrubFrac = Math.min(1, (now - playT0)/1000/Math.max(0.001, active.time));
+    $("#scrub").value = Math.round(scrubFrac*1000);
+    renderRobot(); renderTimeline();
+    if(scrubFrac >= 1){ setPlaying(false); return; }
+    requestAnimationFrame(tick);
+  });
 }
 $("#btnReset").addEventListener("click", () => {
   if(!confirm("Replace the current plan with the worked example?")) return;
-  model = seedModel(); sim = defaultSim(model); sel = null; scrubFrac = 0; render(); toast("Example loaded");
+  model = seedModel(); sim = defaultSim(model); sel = null; stopScrub(); render(); toast("Example loaded");
 });
 $("#btnTheme").addEventListener("click", () => {
   const cur = document.documentElement.getAttribute("data-theme");
