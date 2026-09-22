@@ -1523,9 +1523,6 @@ function renderInspector(){
         <input type="text" inputmode="decimal" class="num" id="hE" data-step="5" value="${r2(h.endDeg||0)}" aria-label="end heading"></div></div>
         <div class="hint">Starts from the heading the step before it ends on${it ? "" : " \u2014 shown once a simulated route reaches this step"}.</div>`;
     if(it) body += `<div class="note"><b>${fmt(it.length)} in</b> · <b>${fmt(it.time)}s</b> on the active branch.</div>`;
-    const aim = LANDMARKS.cells.filter(c => c.team === model.alliance);
-    body += `<div class="field" style="margin-top:12px"><label>Aim heading at</label>
-      <div class="addrow">${aim.map(c=>`<button class="btn tiny" data-aim="${c.x},${c.y}">${esc(c.label.replace(/^(RED|BLUE) /,""))}</button>`).join("")}</div></div>`;
   } else if(s.kind === "action"){
     const a = actionOf(s);
     body += `<div class="field"><label>Action</label><select id="nAction">
@@ -1619,12 +1616,6 @@ function renderInspector(){
   });
   numBind("#hDeg", v => s.heading.deg = v); numBind("#hE", v => s.heading.endDeg = v);
   bind("#pMode","change", e => { s.mode = e.target.value; render(); });
-  el.querySelectorAll("[data-aim]").forEach(b => b.addEventListener("click", () => {
-    const [cx,cy] = b.dataset.aim.split(",").map(Number);
-    const deg = r2(Math.atan2(cy - s.end.y, cx - s.end.x) * 180/Math.PI);
-    s.heading = s.heading.mode === "linear" ? { ...s.heading, endDeg: deg } : { mode:"constant", deg };
-    render();
-  }));
   const mvb = el.querySelector("[data-mv='-1']"), mvf = el.querySelector("[data-mv='1']");
   if(mvb) mvb.addEventListener("click", () => moveStep(f, -1));
   if(mvf) mvf.addEventListener("click", () => moveStep(f, 1));
