@@ -334,11 +334,13 @@ pre.code{
       <div class="tabs" role="tablist">
         <button role="tab" data-tab="step" aria-selected="true">Step</button>
         <button role="tab" data-tab="states" aria-selected="false">States</button>
+        <button role="tab" data-tab="actions" aria-selected="false">Actions</button>
         <button role="tab" data-tab="routes" aria-selected="false">Routes</button>
         <button role="tab" data-tab="code" aria-selected="false">Code</button>
       </div>
       <div class="pane" id="paneStep"></div>
       <div class="pane" id="paneStates" hidden></div>
+      <div class="pane" id="paneActions" hidden></div>
       <div class="pane" id="paneRoutes" hidden></div>
       <div class="pane" id="paneCode" hidden></div>
     </aside>
@@ -460,12 +462,18 @@ const nid = (p) => `${p}${(++uid).toString(36)}${Math.random().toString(36).slic
 
 function seedModel(){
   return {
-    version: 4,
+    version: 5,
     name: "RedHiveAuto",
     alliance: "red",
     mirror: "mirrorPoint",
     robot: { w:16, h:16, ...DRIVE_DEFAULTS },
     startPose: { x:8.5, y:132, h:0 },
+    actions: [
+      { id:"aLaunch", name:"Launch POLLEN", method:"launchPollen", ms:1400,
+        note:"Spin the launcher up and feed the held POLLEN into the CELL." },
+      { id:"aIntake", name:"Intake POLLEN", method:"intakePollen", ms:1200,
+        note:"Run the intake until the hopper reads full." }
+    ],
     states: [
       { id:"hive", name:"Hive tipped", varName:"hiveTipped", type:"bool",
         values:[ {id:"true", label:"Tipped"}, {id:"false", label:"Not tipped"} ],
@@ -487,26 +495,44 @@ function seedModel(){
       { id:nid("b"), kind:"branch", name:"Has the hive tipped?", stateId:"hive", cases:[
         { valueId:"true", steps:[
             mv("Cross to the far CELL", 34,88, [{x:38,y:74}], {mode:"constant", deg:-16}),
-            act("Launch 3 POLLEN", "launchPollen", 1400) ] },
+            act("aLaunch") ] },
         { valueId:"false", steps:[
             mv("Line up on the up CELL", 34,60, [], {mode:"constant", deg:6}),
-            act("Launch 3 POLLEN", "launchPollen", 1400) ] }
+            act("aLaunch") ] }
       ]},
       { id:nid("b"), kind:"branch", name:"Partner already tipped?", stateId:"pscore", cases:[
         { valueId:"true", steps:[
             mv("Park in LOADING ZONE", 7,106, [{x:20,y:96}], {mode:"linear", endDeg:180}) ] },
         { valueId:"false", steps:[
             mv("Down to the left FLOWER", 14,48, [{x:26,y:60}], {mode:"constant", deg:180}),
-            act("Intake 2 POLLEN", "intakePollen", 1200),
+            act("aIntake"),
             mv("Second launch spot", 33,66, [{x:24,y:58}], {mode:"constant", deg:0}),
-            act("Launch 2 POLLEN", "launchPollen", 1200),
+            act("aLaunch"),
             mv("Park in LOADING ZONE", 7,106, [{x:16,y:92}], {mode:"linear", endDeg:180}) ] }
       ]}
     ]
   };
 }
 function mv(name,x,y,ctrl,heading){ return { id:nid("m"), kind:"move", name, end:{x,y}, ctrl:ctrl||[], heading }; }
-function act(name,method,ms){ return { id:nid("a"), kind:"action", name, method, ms }; }
+/** An action step names nothing of its own: it points at an entry in `model.actions`,
+    so the same mechanism call can be dropped anywhere in the plan and renamed or
+    retimed once. `actionOf` is the only place that resolves the pointer, and it takes
+    the plan explicitly because the mirrored copy and the code generator carry their own. */
+function act(actionId){ return { id:nid("a"), kind:"action", actionId }; }
+function actionOf(step, m){
+  const list = ((m || model).actions) || [];
+  return list.find(a => a.id === step.actionId) || null;
+}
+/** Seconds-on-the-clock source for the non-move kinds: an action's duration lives in
+    the library, a wait's on the step. */
+function stepMs(step, m){
+  if(step.kind === "action"){ const a = actionOf(step, m); return a ? Math.max(0, a.ms||0) : 0; }
+  return Math.max(0, step.ms||0);
+}
+function stepLabel(step, m){
+  if(step.kind === "action"){ const a = actionOf(step, m); return a ? a.name : "Missing action"; }
+  return step.name || step.kind;
+}
 
 /* ===================== geometry ===================== */
 function bezAt(pts, t){
@@ -735,7 +761,7 @@ function enumerateRoutes(model){
            items.concat([{ kind:"move", step:st, ...g }]), time + g.time);
       return;
     }
-    const d = (st.ms||0)/1000;
+    const d = stepMs(st, model)/1000;
     step(next, pose, assign, items.concat([{ kind:st.kind, step:st, pose, time:d }]), time + d);
   }
 
@@ -791,8 +817,11 @@ function loadModel(){
     motion numbers for a mecanum drivetrain the planner derives them from, so an older
     plan keeps its geometry and picks up the default drivetrain. v4 dropped a linear
     turn's stored start angle, so the turn now begins at whatever heading the previous
-    step ended on. Runs on pasted-in plans too, which is also what fills in a field
-    someone edited out of the JSON. */
+    step ended on. v5 lifted every action step's method and duration into a shared
+    `actions` library the step now points at, keying the library on method + duration so
+    two steps that called one method for different lengths stay two entries rather than
+    silently retiming one of them. Runs on pasted-in plans too, which is also what fills
+    in a field someone edited out of the JSON. */
 function migrate(m){
   if(!(m.version >= 2)){ m.mirror = "mirrorPoint"; m.version = 2; }
   if(!(m.version >= 3)){
@@ -809,6 +838,26 @@ function migrate(m){
     })(m.steps);
     m.version = 4;
   }
+  if(!(m.version >= 5)){
+    const lib = [], byKey = new Map();
+    (function lift(list){
+      for(const st of list||[]){
+        if(st.kind === "action"){
+          const method = st.method || "doThing", ms = Math.max(0, st.ms||0);
+          const k = method + "|" + ms;
+          if(!byKey.has(k)) byKey.set(k, { id:nid("act"), name: st.name || method, method, ms, note:"" });
+          const a = byKey.get(k);
+          if(!lib.includes(a)) lib.push(a);
+          st.actionId = a.id;
+          delete st.method; delete st.ms; delete st.name;
+        }
+        if(st.kind === "branch") for(const c of st.cases||[]) lift(c.steps);
+      }
+    })(m.steps);
+    m.actions = lib;
+    m.version = 5;
+  }
+  if(!Array.isArray(m.actions)) m.actions = [];
   m.robot = { ...DRIVE_DEFAULTS, w:16, h:16,
               ...Object.fromEntries(Object.entries(m.robot||{}).filter(([,v]) => v != null)) };
   return m;
@@ -930,19 +979,20 @@ function renderNode(s, isLive, live, i, n){
     return head + `<div class="kids">${kids}</div>`;
   }
   const ic = s.kind === "move" ? "&#9654;" : s.kind === "action" ? "&#9733;" : "&#9203;";
+  const a = s.kind === "action" ? actionOf(s) : null;
   const meta = s.kind === "move" ? `→ ${r2(s.end.x)}, ${r2(s.end.y)}${s.ctrl.length?` · ${s.ctrl.length} ctrl`:""}`
-             : s.kind === "action" ? `${esc(s.method||"action")}() · ${s.ms||0} ms`
+             : s.kind === "action" ? (a ? `${esc(a.method||"action")}() · ${a.ms||0} ms` : "⚠ pick one in the Actions tab")
              : `${s.ms||0} ms`;
   return `<div class="node ${s.kind}${selc}${on?"":" dead"}" data-sel="${esc(s.id)}">
       <span class="ic">${ic}</span>
-      <div class="bd"><div class="t">${esc(s.name||s.kind)}</div><div class="m mono">${meta}</div></div>
+      <div class="bd"><div class="t">${esc(stepLabel(s))}</div><div class="m mono">${meta}</div></div>
       ${nodeBtns(s, i, n)}</div>`;
 }
 /** The hover-revealed reorder/remove affordances carried by every node in the plan tree.
     Reordering is within the node's own list, so a step never jumps in or out of a branch. */
 function nodeBtns(s, i, n){
   const what = s.kind === "branch" ? "decision" : s.kind;
-  const nm = esc(s.name || s.kind);
+  const nm = esc(stepLabel(s));
   const ord = (d, glyph, word) => `<button class="ord" data-mv-step="${esc(s.id)}" data-d="${d}" type="button"
     ${(d < 0 ? i === 0 : i === n-1) ? "disabled" : ""}
     title="Move this ${what} ${word}" aria-label="Move ${nm} ${word}">${glyph}</button>`;
@@ -966,7 +1016,7 @@ function deleteStep(id){
   if(sel === id) sel = null;
   stopScrub();
   render();
-  toast((s.name || s.kind) + " removed");
+  toast(stepLabel(s) + " removed");
 }
 
 /* ===================== center: field ===================== */
@@ -1150,7 +1200,7 @@ function renderTimeline(){
     const pct = (i.time/span)*100;
     const col = i.kind === "move" ? "var(--amber)" : i.kind === "action" ? "var(--amber2)" : "var(--ink3)";
     return `<div class="blk" style="width:${pct}%;background:${col};opacity:${i.kind==="move"?.92:.72}"
-      title="${esc(i.step.name||i.kind)} · ${fmt(i.time)}s">${pct > 13 ? esc(i.step.name||i.kind) : ""}</div>`;
+      title="${esc(stepLabel(i.step))} · ${fmt(i.time)}s">${pct > 13 ? esc(stepLabel(i.step)) : ""}</div>`;
   }).join("");
   const markPct = (AUTO_LIMIT/span)*100;
   el.innerHTML = blocks + (active.time > AUTO_LIMIT ? `<div class="mark" style="left:${markPct}%"></div>` : "");
@@ -1166,7 +1216,7 @@ function renderTimeline(){
 "use strict";
 /* ===================== right rail ===================== */
 function renderRightPane(){
-  ["step","states","routes","code"].forEach(t => {
+  ["step","states","actions","routes","code"].forEach(t => {
     const p = document.getElementById("pane" + t[0].toUpperCase() + t.slice(1));
     p.hidden = t !== tab;
   });
@@ -1174,6 +1224,7 @@ function renderRightPane(){
   withFocus($(".rail.right"), () => {
     if(tab === "step")   renderInspector();
     if(tab === "states") renderStatesPane();
+    if(tab === "actions") renderActionsPane();
     if(tab === "routes") renderRoutesPane();
     if(tab === "code")   renderCodePane();
   });
@@ -1289,7 +1340,9 @@ function renderInspector(){
   }
 
   const s = f.step;
-  let body = `<div class="field"><label>Name</label><input type="text" id="nName" value="${esc(s.name||"")}"></div>`;
+  // an action step is named by the library entry it points at, so it has no name of its own
+  let body = s.kind === "action" ? ""
+    : `<div class="field"><label>Name</label><input type="text" id="nName" value="${esc(s.name||"")}"></div>`;
 
   if(s.kind === "move"){
     const h = s.heading;
@@ -1322,9 +1375,19 @@ function renderInspector(){
     body += `<div class="field" style="margin-top:12px"><label>Aim heading at</label>
       <div class="addrow">${aim.map(c=>`<button class="btn tiny" data-aim="${c.x},${c.y}">${esc(c.label.replace(/^(RED|BLUE) /,""))}</button>`).join("")}</div></div>`;
   } else if(s.kind === "action"){
-    body += `<div class="field"><label>Java method</label><input type="text" id="nMethod" value="${esc(s.method||"")}"></div>
-      <div class="field"><label>Duration ms</label><input type="text" inputmode="decimal" class="num" id="nMs" data-step="100" value="${s.ms||0}"></div>
-      <div class="hint">Exported as <span class="mono">instant(this::method)</span> followed by a wait.</div>`;
+    const a = actionOf(s);
+    body += `<div class="field"><label>Action</label><select id="nAction">
+        ${(model.actions||[]).map(x=>`<option value="${esc(x.id)}"${x.id===s.actionId?" selected":""}>${esc(x.name)}</option>`).join("")}
+        ${a ? "" : `<option value="" selected>— pick an action —</option>`}</select></div>`;
+    if(a) body += `<div class="kv"><span>Java method</span><b class="mono">${esc(a.method||"")}()</b>
+        <span>Duration</span><b>${a.ms||0} ms</b></div>
+      ${a.note ? `<div class="hint">${esc(a.note)}</div>` : ""}
+      <div class="hint">Exported as <span class="mono">instant(this::${esc(camel(a.method||a.name,"doAction"))})</span> followed by
+        a wait. Rename it, change the method or retime it in the <b>Actions</b> tab and every step that uses it follows.</div>`;
+    else body += `<div class="note">This step has no action. Pick one above, or add one in the Actions tab.</div>`;
+    body += `<div class="addrow">
+      <button class="btn tiny" data-actedit="1">Edit actions</button>
+      <button class="btn tiny" data-actnew="1">+ New action</button></div>`;
   } else if(s.kind === "wait"){
     body += `<div class="field"><label>Duration ms</label><input type="text" inputmode="decimal" class="num" id="nMs" data-step="100" value="${s.ms||0}"></div>`;
   } else if(s.kind === "branch"){
@@ -1345,7 +1408,11 @@ function renderInspector(){
   bind("#nName","input", e => { s.name = e.target.value; render(); });
   numBind("#eX", v => s.end.x = v); numBind("#eY", v => s.end.y = v);
   numBind("#nMs", v => s.ms = Math.max(0, v));
-  bind("#nMethod","input", e => { s.method = e.target.value; render(); });
+  bind("#nAction","change", e => { s.actionId = e.target.value; render(); });
+  const aEdit = el.querySelector("[data-actedit]");
+  if(aEdit) aEdit.addEventListener("click", () => { tab = "actions"; renderRightPane(); });
+  const aNew = el.querySelector("[data-actnew]");
+  if(aNew) aNew.addEventListener("click", () => { s.actionId = addAction().id; tab = "actions"; render(); });
   bind("#nCtrl","change", e => {
     const n = +e.target.value, mid = active && active.items.find(i=>i.step.id===s.id);
     const from = mid ? mid.startPose : model.startPose;
@@ -1474,6 +1541,70 @@ function syncBranches(st){
     for(const c of s.cases) walk(c.steps); } })(model.steps);
 }
 
+/* ===================== actions pane ===================== */
+/** The mechanism calls this OpMode can make, declared once and pointed at from any
+    number of action steps. Editing one here retimes and renames every step that uses
+    it, which is the whole reason it is a list and not a field on the step. */
+function actionUsage(){
+  const n = {};
+  (function walk(list){ for(const st of list||[]){
+    if(st.kind === "action") n[st.actionId] = (n[st.actionId]||0) + 1;
+    if(st.kind === "branch") for(const c of st.cases||[]) walk(c.steps); } })(model.steps);
+  return n;
+}
+function addAction(){
+  const k = (model.actions||[]).length + 1;
+  const a = { id:nid("act"), name:"New action "+k, method:"doThing"+(k>1?k:""), ms:800, note:"" };
+  (model.actions = model.actions || []).push(a);
+  return a;
+}
+function renderActionsPane(){
+  const use = actionUsage();
+  const rows = (model.actions||[]).map((a,ai) => {
+    const n = use[a.id] || 0;
+    return `<div class="stlist" data-si="a${ai}">
+      <div class="field"><label>Name</label><input type="text" class="acN" value="${esc(a.name)}"></div>
+      <div class="row2">
+        <div class="field"><label>Java method</label><input type="text" class="acM mono" value="${esc(a.method||"")}"></div>
+        <div class="field"><label>Duration ms</label><input type="text" inputmode="decimal" class="num acMs" data-step="100" value="${a.ms||0}"></div>
+      </div>
+      <div class="field"><label>What it does</label><textarea class="acNote" rows="2">${esc(a.note||"")}</textarea></div>
+      <div class="addrow"><span class="hint" style="margin:0 auto 0 2px">Used by ${n} step${n===1?"":"s"}</span>
+        <button class="btn ghost tiny acDup">Duplicate</button>
+        <button class="btn ghost tiny acDel" style="color:var(--red)">Delete</button></div>
+    </div>`;
+  }).join("");
+  $("#paneActions").innerHTML = (rows || `<div class="hint">No actions yet. Add the mechanism calls your OpMode can make
+      — an intake, a launcher, an arm — then pick one on every Action step in the plan.</div>`) + `
+    <button class="btn primary" id="addAction">+ Add action</button>
+    <div class="note" style="margin-top:12px">Each one exports as a <span class="mono">private void</span> TODO stub
+    plus <span class="mono">instant(this::method)</span> wherever the plan runs it, so the same call is written once
+    however many steps use it. The duration is how long the plan waits after firing it — it is what the 30&nbsp;s
+    clock counts, not something the robot enforces.</div>`;
+
+  $("#paneActions").querySelectorAll(".stlist").forEach(box => {
+    const a = model.actions[+box.dataset.si.slice(1)];
+    box.querySelector(".acN").addEventListener("input", e => { a.name = e.target.value; save(); renderTree(); renderTimeline(); });
+    box.querySelector(".acM").addEventListener("input", e => { a.method = e.target.value; save(); renderTree(); });
+    box.querySelector(".acNote").addEventListener("input", e => { a.note = e.target.value; save(); });
+    box.querySelector(".acMs").addEventListener("input", e => {
+      const v = parseFloat(e.target.value);
+      if(isNaN(v)) return;                 // a half-typed box is not a retime
+      a.ms = Math.max(0, v); render();     // durations move the clock, so re-solve the routes
+    });
+    box.querySelector(".acDup").addEventListener("click", () => {
+      const copy = { ...a, id:nid("act"), name: a.name + " copy" };
+      model.actions.splice(model.actions.indexOf(a)+1, 0, copy); render();
+    });
+    box.querySelector(".acDel").addEventListener("click", () => {
+      const n = actionUsage()[a.id] || 0;
+      if(n) return toast(`${a.name} is used by ${n} step${n===1?"":"s"} — point them elsewhere first.`);
+      model.actions = model.actions.filter(x => x !== a); render();
+    });
+  });
+  $("#addAction").addEventListener("click", () => { addAction(); render(); });
+}
+
 /* ===================== routes pane ===================== */
 function renderRoutesPane(){
   const rows = R.routes.map((rt,i) => {
@@ -1561,9 +1692,12 @@ function generate(model, opts){
     pathKey.set(k, name);
     return name;
   }
+  /** Two steps that point at the same library entry are the same Java method, and so
+      are two entries that spell one method name — the stub is emitted once either way. */
   function actionMethod(step){
-    const n = camel(step.method || step.name, "doAction");
-    if(!actions.has(n)) actions.set(n, step.name || n);
+    const a = actionOf(step, model);
+    const n = camel(a ? (a.method || a.name) : "doAction", "doAction");
+    if(!actions.has(n)) actions.set(n, (a && (a.note || a.name)) || n);
     return n;
   }
   function addHelper(hint, parts){
@@ -1586,7 +1720,8 @@ function generate(model, opts){
     if(st.kind === "wait") return [`waitMs(${Math.round(st.ms||0)})`].concat(flow(next, pose0, assign));
     if(st.kind === "action"){
       const a = [`instant(this::${actionMethod(st)})`];
-      if(st.ms > 0) a.push(`waitMs(${Math.round(st.ms)})`);
+      const ms = stepMs(st, model);
+      if(ms > 0) a.push(`waitMs(${Math.round(ms)})`);
       return a.concat(flow(next, pose0, assign));
     }
     const sv = byId[st.stateId];
@@ -1637,7 +1772,7 @@ function generate(model, opts){
   }).join("\n\n");
 
   const actionStubs = [...actions.entries()].map(([n,label]) =>
-    `    /** ${label.replace(/\*\//g,"")} */\n    private ${n}() {\n        // TODO: drive your mechanism here.\n    }`
+    `    /** ${label.replace(/\s+/g," ").replace(/\*\//g,"")} */\n    private ${n}() {\n        // TODO: drive your mechanism here.\n    }`
       .replace(`private ${n}()`, `private void ${n}()`)).join("\n\n");
 
   const poseFields = poses.map(p =>
@@ -1889,7 +2024,11 @@ function addStep(kind, list){
     const last = active && [...active.items].reverse().find(i => i.kind==="move");
     const from = last ? last.endPose : model.startPose;
     s = mv("New move", r2(Math.min(FIELD-6, from.x + 18)), r2(from.y), [], { mode:"tangent" });
-  } else if(kind === "action") s = act("New action", "doThing", 800);
+  } else if(kind === "action"){
+    // a plan with no library yet gets its first entry rather than a dead step
+    const a = (model.actions && model.actions[0]) || addAction();
+    s = act(a.id);
+  }
   else if(kind === "wait")     s = { id:nid("w"), kind:"wait", name:"Wait", ms:500 };
   else {
     const st = model.states[0];

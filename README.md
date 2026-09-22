@@ -69,9 +69,13 @@ and export a [Pedro Pathing](https://pedropathing.com/) OpMode that makes those 
    the robot's mass; the panel shows the forward, strafe, diagonal and turn speeds it
    derives from them.
 2. Define the match states your auto has to react to (States tab).
-3. Build the plan in the left rail: **Move**, **Action**, **Wait**, **Decision**.
-4. Flip the state chips to walk each branch; check the Routes tab for the slowest one.
-5. Copy the OpMode from the Code tab into your `teamcode` package — once as planned, and
+3. List the mechanism calls your OpMode can make — a name, the Java method and how long
+   it takes — in the Actions tab. An Action step in the plan picks one from that list, so
+   the same call is described once however many times the plan runs it, and renaming or
+   retiming it there updates every step that uses it.
+4. Build the plan in the left rail: **Move**, **Action**, **Wait**, **Decision**.
+5. Flip the state chips to walk each branch; check the Routes tab for the slowest one.
+6. Copy the OpMode from the Code tab into your `teamcode` package — once as planned, and
    once from the mirrored side if you want the matching OpMode for the other alliance.
    The mirrored copy differs from the first by one line when you export it through the
    PoseFactory, so it stays easy to diff as the plan changes.
