@@ -156,16 +156,9 @@ button,input,select,textarea{font:inherit;color:inherit}
 .caselab.active{color:var(--ink)}
 .caselab.active .dot{background:var(--amber)}
 .node.parallel .ic{color:var(--blue);font-size:12px}
-.leglab{
-  display:flex;align-items:center;gap:6px;font-size:10px;font-family:Archivo;font-weight:700;
-  letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);padding:6px 0 3px 2px;
-}
-.leglab .bar{width:6px;height:7px;background:var(--blue);
-  clip-path:polygon(0 0,38% 0,38% 100%,0 100%,0 0,62% 0,100% 0,100% 100%,62% 100%)}
-.leglab em{font-style:normal;font-weight:500;letter-spacing:.04em;text-transform:none;opacity:.8}
-.leglab b{margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none;font-family:IBM Plex Mono,monospace}
-.leglab.active{color:var(--ink)}
-.leglab.active .bar{background:var(--amber)}
+/* what a group has to say about one of its steps, on a line under that step's meta */
+.node .m.arm{color:var(--blue)}
+.node.dead .m.arm{color:var(--ink3)}
 .addrow{display:flex;gap:4px;padding:5px 0 2px 2px;flex-wrap:wrap}
 
 /* ---------- stage ---------- */
@@ -517,8 +510,8 @@ function seedModel(){
             mv("Park in LOADING ZONE", 7,106, [{x:20,y:96}], {mode:"linear", endDeg:180}) ] },
         { valueId:"false", steps:[
             par("Intake on the way down", "deadline", [
-              leg("Drive",  [ mv("Down to the left FLOWER", 14,48, [{x:26,y:60}], {mode:"constant", deg:180}) ]),
-              leg("Intake", [ act("aIntake") ]) ]),
+              mv("Down to the left FLOWER", 14,48, [{x:26,y:60}], {mode:"constant", deg:180}),
+              act("aIntake") ]),
             mv("Second launch spot", 33,66, [{x:24,y:58}], {mode:"constant", deg:0}),
             act("aLaunch"),
             mv("Park in LOADING ZONE", 7,106, [{x:16,y:92}], {mode:"linear", endDeg:180}) ] }
@@ -549,28 +542,24 @@ function stepLabel(step, m){
 
 /* ---------- parallel groups ---------- */
 /** Ivy's three ways of running commands at once, and what each one does to the clock.
-    `java` is the static import on `Groups` the generator calls — `deadline` takes the
-    same argument shape, it just treats the first one as the one that ends the group. */
+    The id is the `Groups` method the generator calls — all three take the same argument
+    shape, `deadline` just treats the first one as the one that ends the group. A group's
+    steps are those arguments, one each, so the group is as flat here as it is there. */
 const PARALLEL_MODES = [
-  { id:"all",      java:"parallel", label:"All legs finish",
-    hint:"Runs until the slowest leg is done." },
-  { id:"deadline", java:"deadline", label:"First leg sets the clock",
-    hint:"Runs until leg 1 is done, then interrupts the rest." },
-  { id:"race",     java:"race",     label:"First leg to finish wins",
-    hint:"Runs until any leg is done, then interrupts the rest." }
+  { id:"parallel", label:"Parallel", hint:"Runs until every step in the group is done." },
+  { id:"deadline", label:"Deadline", hint:"Runs until the group's first step is done, then interrupts the rest." },
+  { id:"race",     label:"Race",     hint:"Runs until any step in the group is done, then interrupts the rest." }
 ];
 const parallelMode = (id) => PARALLEL_MODES.find(m => m.id === id) || PARALLEL_MODES[0];
-function leg(name, steps){ return { id:nid("leg"), name, steps: steps || [] }; }
-function par(name, mode, legs){
-  return { id:nid("p"), kind:"parallel", name, mode: mode || "all",
-           legs: legs || [leg("Drive"), leg("Mechanism")] };
+function par(name, mode, steps){
+  return { id:nid("p"), kind:"parallel", name, mode: mode || "parallel", steps: steps || [] };
 }
-/** The step lists nested under a step — a decision's cases, a parallel group's legs.
+/** The step lists nested under a step — a decision's cases, a parallel group's steps.
     Every walk of the tree that only cares about containment goes through this, so a
     new container kind lands in all of them at once. */
 function childLists(s){
   if(s.kind === "branch")   return (s.cases||[]).map(c => c.steps);
-  if(s.kind === "parallel") return (s.legs ||[]).map(l => l.steps);
+  if(s.kind === "parallel") return [s.steps || []];
   return [];
 }
 
@@ -743,7 +732,7 @@ function mirrorSteps(list, mode){
     } else if(s.kind === "branch"){
       c.cases = (s.cases||[]).map(cs => ({ ...cs, steps: mirrorSteps(cs.steps, mode) }));
     } else if(s.kind === "parallel"){
-      c.legs = (s.legs||[]).map(lg => ({ ...lg, steps: mirrorSteps(lg.steps, mode) }));
+      c.steps = mirrorSteps(s.steps, mode);
     }
     return c;
   });
@@ -769,52 +758,37 @@ function mirrorPlan(m, mode){
 }
 
 /* ===================== parallel groups ===================== */
-/** A leg runs on its own clock: its moves thread a pose forward from wherever the
-    group was entered, its actions and waits only spend time. The items come back in
-    the same shape the route carries, so the field draws a path inside a leg exactly
-    as it draws one in the main line. */
-function solveLeg(lg, pose, robot, m){
-  const items = [];
-  let p = { ...pose }, t = 0;
-  for(const st of (lg.steps || [])){
-    if(st.kind === "move"){
-      const g = solveMove(st, p, robot);
-      items.push({ kind:"move", step:st, ...g });
-      p = g.endPose; t += g.time;
-    } else {
-      const d = stepMs(st, m)/1000;
-      items.push({ kind:st.kind, step:st, pose:p, time:d });
-      t += d;
-    }
-  }
-  return { leg:lg, items, time:t, endPose:p };
-}
 /**
- * One robot, one drivetrain — so only one leg of a group can drive, and that leg's
- * end pose is the group's. `extraDrive` counts the others that also try, which is a
- * plan error rather than a slow plan: at runtime Ivy would hand two commands the same
- * follower.
+ * A group's steps are its arms: they all start from the pose the group was entered at
+ * and each runs on its own clock, because they run at the same time. `parallel` waits
+ * for the slowest, `race` stops at the fastest, `deadline` stops when the first one does.
  *
- * `all` waits for the slowest leg, `race` stops at the fastest, `deadline` stops when
- * leg 1 does. Under the last two a driving leg can be cut off part-way down its path,
- * and where the robot actually coasts to is not something this planner can know — so
- * the pose threads on as if the move finished and `clipped` says not to trust it.
+ * One robot, one drivetrain — so only one arm can be a move, and its end pose is the
+ * group's. `extraDrive` counts the others that also drive, which is a plan error rather
+ * than a slow plan: at runtime Ivy would hand two commands the same follower.
+ *
+ * Under `race` and `deadline` a driving arm can be cut off part-way down its path, and
+ * where the robot actually coasts to is not something this planner can know — so the
+ * pose threads on as if the move had finished and `clipped` says not to trust it.
  */
 function solveParallel(step, pose, robot, m){
-  const legs  = (step.legs || []).map(lg => solveLeg(lg, pose, robot, m));
+  // an arm comes back in the shape the route carries, so the field draws a path inside a
+  // group exactly as it draws one in the main line
+  const arms = (step.steps || []).map(st => st.kind === "move"
+    ? { kind:"move", step:st, ...solveMove(st, pose, robot) }
+    : { kind:st.kind, step:st, pose:{ ...pose }, time: stepMs(st, m)/1000 });
   const mode  = parallelMode(step.mode).id;
-  const drives = (L) => L.items.some(i => i.kind === "move");
-  const times = legs.map(l => l.time);
-  const time  = !legs.length      ? 0
+  const times = arms.map(a => a.time);
+  const time  = !arms.length        ? 0
               : mode === "race"     ? Math.min(...times)
               : mode === "deadline" ? times[0]
               :                       Math.max(...times);
-  const drive = legs.findIndex(drives);
-  const d = drive < 0 ? null : legs[drive];
-  return { legs, time, drive,
+  const drive = arms.findIndex(a => a.kind === "move");
+  const d = drive < 0 ? null : arms[drive];
+  return { arms, time, drive,
            endPose: d ? { ...d.endPose } : { ...pose },
            clipped: !!d && d.time > time + 1e-6,
-           extraDrive: legs.filter((L,i) => i !== drive && drives(L)).length };
+           extraDrive: arms.filter((a,i) => i !== drive && a.kind === "move").length };
 }
 
 /* ===================== route enumeration ===================== */
@@ -875,17 +849,17 @@ function liveIds(route){
   if(route) for(const it of route.items){
     s.add(it.step.id);
     if(it.kind === "branch") s.add(it.step.id+"::"+it.valueId);
-    if(it.kind === "parallel") for(const L of it.legs){ s.add(L.leg.id); for(const i2 of L.items) s.add(i2.step.id); }
+    if(it.kind === "parallel") for(const a of it.arms) s.add(a.step.id);
   }
   return s;
 }
-/** Every move a route drives, the ones inside parallel legs included. The field draws
+/** Every move a route drives, the ones inside parallel groups included. The field draws
     and drags off this rather than `route.items`, which carries a group as one item. */
 function moveItems(route){
   const out = [];
   for(const it of (route ? route.items : [])){
     if(it.kind === "move") out.push(it);
-    else if(it.kind === "parallel") for(const L of it.legs) for(const i2 of L.items) if(i2.kind === "move") out.push(i2);
+    else if(it.kind === "parallel") for(const a of it.arms) if(a.kind === "move") out.push(a);
   }
   return out;
 }
@@ -932,8 +906,9 @@ function loadModel(){
     step ended on. v5 lifted every action step's method and duration into a shared
     `actions` library the step now points at, keying the library on method + duration so
     two steps that called one method for different lengths stay two entries rather than
-    silently retiming one of them. Runs on pasted-in plans too, which is also what fills
-    in a field someone edited out of the JSON. */
+    silently retiming one of them. v6 flattened a parallel group's named legs into the
+    plain step list the group now holds, one step per concurrent arm. Runs on pasted-in
+    plans too, which is also what fills in a field someone edited out of the JSON. */
 function migrate(m){
   if(!(m.version >= 2)){ m.mirror = "mirrorPoint"; m.version = 2; }
   if(!(m.version >= 3)){
@@ -969,18 +944,29 @@ function migrate(m){
     m.actions = lib;
     m.version = 5;
   }
+  if(!(m.version >= 6)){
+    // a parallel group used to hold named legs that could each be a sequence; it now
+    // holds steps, one per argument to the Ivy call. A leg of several steps has nowhere
+    // left to put its ordering, so its steps come out as arms of their own — the only
+    // thing the flatter shape can say, and worth saying here rather than silently.
+    (function flat(list){
+      for(const st of list||[]){
+        if(st.kind === "parallel"){
+          if(Array.isArray(st.legs)){ st.steps = st.legs.flatMap(l => (l && l.steps) || []); delete st.legs; }
+          if(st.mode === "all") st.mode = "parallel";
+        }
+        for(const kid of childLists(st)) flat(kid);
+      }
+    })(m.steps);
+    m.version = 6;
+  }
   // hand-edited JSON is the only way a group arrives half-formed; the readers below
   // all tolerate it, but repairing it here keeps the editor from showing the damage
   (function fixPar(list){
     for(const st of list||[]){
       if(st.kind === "parallel"){
-        if(!Array.isArray(st.legs)) st.legs = [];
-        if(!PARALLEL_MODES.some(x => x.id === st.mode)) st.mode = "all";
-        st.legs.forEach((lg,i) => {
-          if(!lg.id) lg.id = nid("leg");
-          if(!lg.name) lg.name = "Leg " + (i+1);
-          if(!Array.isArray(lg.steps)) lg.steps = [];
-        });
+        if(!Array.isArray(st.steps)) st.steps = [];
+        if(!PARALLEL_MODES.some(x => x.id === st.mode)) st.mode = "parallel";
       }
       for(const kid of childLists(st)) fixPar(kid);
     }
@@ -1080,18 +1066,20 @@ function renderTree(){
 }
 const ADD_LABEL = { move:"Move", action:"Action", wait:"Wait", parallel:"Parallel", branch:"Decision" };
 const ADD_KINDS = ["move","action","wait","parallel","branch"];
-/** `kinds` narrows what a list will take. Inside a parallel leg the containers are left
-    out: a leg is a flat sequence, which is what keeps `solveLeg` and the route walk from
-    having to fork a branch that only exists on one of several concurrent clocks. */
-function renderList(list, isLive, live, kinds){
+/** `kinds` narrows what a list will take. Inside a parallel group the containers are
+    left out: a group's steps are the arguments to one Ivy call, which is what keeps the
+    route walk from having to fork a decision that only exists on one of several
+    concurrent clocks. `ann` hangs a note off a step's meta line — what the group has to
+    say about the arm that step turned out to be, since the rows carry no headers. */
+function renderList(list, isLive, live, kinds, ann){
   const idx = listReg.push(list) - 1;
-  const rows = list.map((s,i) => renderNode(s, isLive, live, i, list.length)).join("");
+  const rows = list.map((s,i) => renderNode(s, isLive, live, i, list.length, ann)).join("");
   const btns = (kinds || ADD_KINDS).map(k =>
     `<button class="btn ghost tiny" data-add="${k}" data-list="${idx}">+ ${ADD_LABEL[k]}</button>`).join("");
   return rows + `<div class="addrow">${btns}</div>`;
 }
-const LEG_KINDS = ["move","action","wait"];
-function renderNode(s, isLive, live, i, n){
+const ARM_KINDS = ["move","action","wait"];
+function renderNode(s, isLive, live, i, n, ann){
   const on = isLive && live.has(s.id);
   const selc = sel === s.id ? " sel" : "";
   if(s.kind === "branch"){
@@ -1110,35 +1098,37 @@ function renderNode(s, isLive, live, i, n){
     return head + `<div class="kids">${kids}</div>`;
   }
   if(s.kind === "parallel"){
-    const md = parallelMode(s.mode), legs = s.legs || [];
+    const md = parallelMode(s.mode), kids = s.steps || [];
     const it = active && active.items.find(x => x.kind === "parallel" && x.step.id === s.id);
+    // how long each arm runs, and whether it gets to finish — an arm that outlasts the
+    // group is interrupted where it stands, which is why its own time reads longer
+    const notes = new Map();
+    if(it) it.arms.forEach((a,ai) => {
+      const bits = [fmt(a.time) + "s"];
+      if(md.id === "deadline" && ai === 0) bits.push("sets the clock");
+      else if(a.time > it.time + 1e-6) bits.push(`cut off at ${fmt(it.time)}s`);
+      if(a.kind === "move" && ai !== it.drive) bits.push("⚠ second driver");
+      notes.set(a.step.id, bits.join(" · "));
+    });
     const head = `<div class="node parallel${selc}${on?"":" dead"}" data-sel="${esc(s.id)}">
         <span class="ic">&#8214;</span>
         <div class="bd"><div class="t">${esc(s.name || "Parallel")}</div>
-        <div class="m mono">${esc(md.java)}() · ${legs.length} leg${legs.length===1?"":"s"}${
-          it ? ` · ${fmt(it.time)}s` : ""}${it && it.extraDrive ? " · ⚠ two legs drive" : ""}</div></div>
+        <div class="m mono">${esc(md.id)}()${it ? ` · ${fmt(it.time)}s` : ` · ${kids.length}`}</div>
+        ${it && it.extraDrive ? `<div class="m mono arm">⚠ ${it.extraDrive+1} of these drive</div>` : ""}</div>
         ${nodeBtns(s, i, n)}</div>`;
-    const kids = legs.map((lg,li) => {
-      const L = it && it.legs[li];
-      // a leg that outlasts the group is interrupted where it stands — worth saying on
-      // the row, since the leg's own time then reads longer than the group's
-      const note = L && L.time > it.time + 1e-6 ? "cut off"
-                 : s.mode === "deadline" && li === 0 ? "sets the clock"
-                 : L && it.drive === li ? "drives" : "";
-      return `<div class="leglab${on?" active":""}"><span class="bar"></span>${esc(lg.name || ("Leg "+(li+1)))}${
-          note ? ` <em>${note}</em>` : ""}${L ? ` <b>${fmt(L.time)}s</b>` : ""}</div>
-        <div class="kids">${renderList(lg.steps, on, live, LEG_KINDS)}</div>`;
-    }).join("");
-    return head + `<div class="kids">${kids}</div>`;
+    return head + `<div class="kids">${renderList(kids, on, live, ARM_KINDS, notes)}</div>`;
   }
   const ic = s.kind === "move" ? "&#9654;" : s.kind === "action" ? "&#9733;" : "&#9203;";
   const a = s.kind === "action" ? actionOf(s) : null;
   const meta = s.kind === "move" ? `→ ${r2(s.end.x)}, ${r2(s.end.y)}${s.ctrl.length?` · ${s.ctrl.length} ctrl`:""}`
              : s.kind === "action" ? (a ? `${esc(a.method||"action")}() · ${a.ms||0} ms` : "⚠ pick one in the Actions tab")
              : `${s.ms||0} ms`;
+  const note = ann && ann.get(s.id);
   return `<div class="node ${s.kind}${selc}${on?"":" dead"}" data-sel="${esc(s.id)}">
       <span class="ic">${ic}</span>
-      <div class="bd"><div class="t">${esc(stepLabel(s))}</div><div class="m mono">${meta}</div></div>
+      <div class="bd"><div class="t">${esc(stepLabel(s))}</div>
+      <div class="m mono">${meta}</div>
+      ${note ? `<div class="m mono arm">${esc(note)}</div>` : ""}</div>
       ${nodeBtns(s, i, n)}</div>`;
 }
 /** The hover-revealed reorder/remove affordances carried by every node in the plan tree.
@@ -1335,27 +1325,17 @@ function poseAtFrac(route, frac, plan){
       }
       t -= it.time; cur = it.endPose;
     } else if(it.kind === "parallel"){
-      // playback follows the driving leg and then holds: the other legs are mechanisms,
+      // playback follows the driving arm and then parks: the other arms are mechanisms,
       // which the field has nothing to draw for
-      if(t <= it.time) return poseInLeg(it.drive < 0 ? null : it.legs[it.drive], t, cur);
+      if(t <= it.time){
+        const d = it.drive < 0 ? null : it.arms[it.drive];
+        if(!d) return cur;
+        const f = d.time > 0 ? Math.max(0, Math.min(1, t/d.time)) : 1;
+        const p = bezAt(d.raw, paramAt(d.s, f));
+        return { x:p.x, y:p.y, h: headingAt(d.step.heading, d.s, f, d.startPose.h) };
+      }
       t -= it.time; cur = it.endPose;
     } else if(it.time){ if(t <= it.time) return cur; t -= it.time; }
-  }
-  return cur;
-}
-/** Where the robot is `t` seconds into a leg — the leg's own moves in order, then
-    parked at its end for however long the rest of the group still runs. */
-function poseInLeg(L, t, fallback){
-  if(!L) return { ...fallback };
-  let cur = { ...fallback };
-  for(const it of L.items){
-    if(it.kind !== "move"){ t -= (it.time||0); if(t <= 0) return cur; continue; }
-    if(t <= it.time){
-      const f = it.time > 0 ? Math.max(0, Math.min(1, t/it.time)) : 1;
-      const p = bezAt(it.raw, paramAt(it.s, f));
-      return { x:p.x, y:p.y, h: headingAt(it.step.heading, it.s, f, it.startPose.h) };
-    }
-    t -= it.time; cur = it.endPose;
   }
   return cur;
 }
@@ -1563,42 +1543,34 @@ function renderInspector(){
   } else if(s.kind === "wait"){
     body += `<div class="field"><label>Duration ms</label><input type="text" inputmode="decimal" class="num" id="nMs" data-step="100" value="${s.ms||0}"></div>`;
   } else if(s.kind === "parallel"){
-    const md = parallelMode(s.mode), legs = s.legs || [];
+    const md = parallelMode(s.mode), kids = s.steps || [];
     const it = active && active.items.find(x => x.kind === "parallel" && x.step.id === s.id);
-    body += `<div class="field"><label>Ends when</label><select id="pMode">
+    body += `<div class="field"><label>Runs as</label><select id="pMode">
         ${PARALLEL_MODES.map(m=>`<option value="${m.id}"${md.id===m.id?" selected":""}>${esc(m.label)}</option>`).join("")}
       </select></div>
-      <div class="hint">${esc(md.hint)} Exported as <span class="mono">${esc(md.java)}(…)</span> from
-        Ivy's <span class="mono">Groups</span>, one argument per leg.</div>
-      <div class="field" style="margin-top:12px"><label>Legs</label></div>`;
-    legs.forEach((lg,li) => {
-      const L = it && it.legs[li];
-      body += `<div class="row2" style="align-items:center;margin-bottom:4px">
-          <input type="text" class="legName" data-vi="${li}" value="${esc(lg.name||"")}" aria-label="leg ${li+1} name">
-          <div class="addrow" style="padding:0;flex-wrap:nowrap;justify-content:flex-end">
-            <button class="btn tiny" data-legmv="${li}" data-d="-1"${li===0?" disabled":""} aria-label="move leg up">&#9650;</button>
-            <button class="btn tiny" data-legmv="${li}" data-d="1"${li===legs.length-1?" disabled":""} aria-label="move leg down">&#9660;</button>
-            <button class="btn tiny" data-legdel="${li}" style="color:var(--red)" aria-label="remove leg">&#215;</button>
-          </div></div>
-        ${L ? `<div class="hint" style="margin:-2px 0 8px">${fmt(L.time)}s · ${countSteps(lg.steps)} step${countSteps(lg.steps)===1?"":"s"}${
-            it.drive === li ? " · drives the robot" : ""}${md.id==="deadline" && li===0 ? " · sets the clock" : ""}${
-            L.time > it.time + 1e-6 ? ` · interrupted at ${fmt(it.time)}s` : ""}</div>`
-          : `<div class="hint" style="margin:-2px 0 8px">${countSteps(lg.steps)} step${countSteps(lg.steps)===1?"":"s"}</div>`}`;
-    });
-    body += `<div class="addrow"><button class="btn tiny" data-legadd="1">+ Leg</button></div>`;
-    if(it){
-      body += `<div class="note"><b>${fmt(it.time)}s</b> on the active branch — the group's own clock, not the sum of its legs.</div>`;
+      <div class="hint">${esc(md.hint)} Exported as <span class="mono">${esc(md.id)}(…)</span> from
+        Ivy's <span class="mono">Groups</span>, one argument per step in the group.</div>`;
+    if(it && it.arms.length){
+      body += `<div class="kv" style="margin-top:12px">` + it.arms.map((a,ai) =>
+        `<span>${esc(stepLabel(a.step))}</span><b>${fmt(a.time)}s${
+          md.id === "deadline" && ai === 0 ? " · sets the clock"
+          : a.time > it.time + 1e-6 ? " · cut off" : ""}</b>`).join("") +
+        `<span><b>Group</b></span><b>${fmt(it.time)}s</b></div>`;
       if(it.extraDrive)
-        body += `<div class="note warn">More than one leg drives. There is one drivetrain, so at runtime Ivy would
-          hand the follower to two commands at once; here only the first driving leg is simulated. Move the extra
-          moves out of the group.</div>`;
+        body += `<div class="note warn">More than one step in this group drives. There is one drivetrain, so at
+          runtime Ivy would hand the follower to two commands at once; here only the first move is simulated.
+          Move the extra ones out of the group.</div>`;
       else if(it.clipped)
-        body += `<div class="note warn">The driving leg needs ${fmt(it.legs[it.drive].time)}s but the group ends at
-          ${fmt(it.time)}s, so the path is cut off part-way and the robot stops wherever it got to. Every pose after
-          this group is simulated as if the move had finished — treat them as a guess until you run it.</div>`;
+        body += `<div class="note warn">The move in this group needs ${fmt(it.arms[it.drive].time)}s but the group
+          ends at ${fmt(it.time)}s, so the path is cut off part-way and the robot stops wherever it got to. Every
+          pose after this group is simulated as if the move had finished — treat them as a guess until you run it.</div>`;
+    } else if(!kids.length){
+      body += `<div class="note">Empty. Add the steps that should run at the same time with the buttons under this
+        group in the plan — one step per thing the robot does at once.</div>`;
     }
-    body += `<div class="hint">A leg is a flat sequence. Decisions and nested groups belong outside the group, so the
-      legs can all run on one clock.</div>`;
+    body += `<div class="hint">Every step in the group starts together, and the ▲▼ on their rows set the order —
+      which is what <b>Deadline</b> reads. Decisions and nested groups go outside the group, so the whole of it
+      runs on one clock.</div>`;
   } else if(s.kind === "branch"){
     body += `<div class="field"><label>Decide on</label><select id="nState">
       ${model.states.map(st=>`<option value="${esc(st.id)}"${st.id===s.stateId?" selected":""}>${esc(st.name)}</option>`).join("")}</select></div>
@@ -1647,22 +1619,6 @@ function renderInspector(){
   });
   numBind("#hDeg", v => s.heading.deg = v); numBind("#hE", v => s.heading.endDeg = v);
   bind("#pMode","change", e => { s.mode = e.target.value; render(); });
-  el.querySelectorAll(".legName").forEach(i => i.addEventListener("input", e => {
-    s.legs[+e.target.dataset.vi].name = e.target.value; render();
-  }));
-  el.querySelectorAll("[data-legmv]").forEach(b => b.addEventListener("click", () => {
-    const i = +b.dataset.legmv, j = i + (+b.dataset.d);
-    if(j < 0 || j >= s.legs.length) return;
-    // under `deadline` the order is the meaning: leg 1 is the one that ends the group
-    const [x] = s.legs.splice(i,1); s.legs.splice(j,0,x); render();
-  }));
-  el.querySelectorAll("[data-legdel]").forEach(b => b.addEventListener("click", () => {
-    const lg = s.legs[+b.dataset.legdel], n = countSteps(lg.steps||[]);
-    if(n && !confirm(`Remove "${lg.name||"this leg"}" and the ${n} step${n===1?"":"s"} in it?`)) return;
-    s.legs.splice(+b.dataset.legdel, 1); stopScrub(); render();
-  }));
-  const legAdd = el.querySelector("[data-legadd]");
-  if(legAdd) legAdd.addEventListener("click", () => { s.legs.push(leg("Leg " + (s.legs.length+1))); render(); });
   el.querySelectorAll("[data-aim]").forEach(b => b.addEventListener("click", () => {
     const [cx,cy] = b.dataset.aim.split(",").map(Number);
     const deg = r2(Math.atan2(cy - s.end.y, cx - s.end.x) * 180/Math.PI);
@@ -1686,11 +1642,7 @@ function renderInspector(){
     render();
   });
 }
-function reid(s){
-  s.id = nid(s.kind[0]);
-  if(s.kind === "parallel") for(const lg of s.legs||[]) lg.id = nid("leg");
-  for(const kid of childLists(s)) kid.forEach(reid);
-}
+function reid(s){ s.id = nid(s.kind[0]); for(const kid of childLists(s)) kid.forEach(reid); }
 /** Reorder within the step's own list. The pose threads forward, so swapping two
     steps re-solves every move after them; playback is abandoned rather than left
     pointing at a route that no longer exists. */
@@ -1939,18 +1891,8 @@ function generate(model, opts){
     helpers.push({ name, parts });
     return name;
   }
-  /** A parallel leg carries no continuation — everything after the group is emitted
-      outside it — so two legs that read the same really are the same method, however
-      many branches reach them. A branch case can't be shared that way, which is why
-      this memo is separate from `addHelper`'s. */
-  const legKey = new Map();
-  function legHelper(hint, parts){
-    const k = camel(hint, "leg") + "\u0000" + parts.join("\u0000");
-    if(!legKey.has(k)) legKey.set(k, addHelper(hint, parts));
-    return legKey.get(k);
-  }
   /** What a step that doesn't drive turns into, wherever it sits — the main line or a
-      parallel leg. An action fires and then holds the clock for its own duration. */
+      parallel group. An action fires and then holds the clock for its own duration. */
   function plain(st){
     if(st.kind === "wait") return [`waitMs(${Math.round(st.ms||0)})`];
     if(st.kind !== "action") return [];
@@ -1974,17 +1916,15 @@ function generate(model, opts){
     if(st.kind === "action") return plain(st).concat(flow(next, pose0, assign));
     if(st.kind === "parallel"){
       const g = solveParallel(st, pose0, model.robot, model);
-      const md = parallelMode(st.mode);
-      // one argument per leg, in the order the editor shows them — which is what makes
+      // one argument per step, in the order the editor shows them — which is what makes
       // `deadline` mean anything, since Ivy reads the first argument as the deadline
-      const args = g.legs.map(L => {
-        const parts = L.items.flatMap(it =>
-          it.kind === "move" ? [`follow(follower, ${pathFor(it.step, it)}())`] : plain(it.step));
+      const args = g.arms.map(a => {
+        const parts = a.kind === "move" ? [`follow(follower, ${pathFor(a.step, a)}())`] : plain(a.step);
         return parts.length === 1 ? parts[0]
              : parts.length === 0 ? `sequential()`
-             : legHelper(L.leg.name || "leg", parts) + "()";
+             : `sequential(${parts.join(", ")})`;   // an action is a fire and then a hold
       });
-      return [args.length ? `${md.java}(${args.join(", ")})` : `sequential()`]
+      return [args.length ? `${parallelMode(st.mode).id}(${args.join(", ")})` : `sequential()`]
         .concat(flow(next, g.endPose, assign));
     }
     const sv = byId[st.stateId];
@@ -2292,13 +2232,8 @@ function addStep(kind, list){
   let s;
   if(kind === "move") s = newMove();
   else if(kind === "action") s = act(anyAction().id);
-  else if(kind === "parallel"){
-    // the common case, pre-built: a mechanism running for as long as the drive takes
-    s = par("Drive and work", "deadline", [
-      leg("Drive",     [ newMove() ]),
-      leg("Mechanism", [ act(anyAction().id) ])
-    ]);
-  }
+  // the common case, pre-built: a mechanism running while the robot drives
+  else if(kind === "parallel") s = par("Drive and work", "parallel", [ newMove(), act(anyAction().id) ]);
   else if(kind === "wait")     s = { id:nid("w"), kind:"wait", name:"Wait", ms:500 };
   else {
     const st = model.states[0];
