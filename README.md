@@ -44,6 +44,15 @@ and export a [Pedro Pathing](https://pedropathing.com/) OpMode that makes those 
   mirrored alliance either **through the PoseFactory** — as-planned coordinates with
   `.mirrorAroundPoint(70.75, 70.75)` chained on, the way you'd write it by hand — or
   with the flipped **coordinates baked in**.
+- **Parallel groups.** A group runs two or more *legs* at once — drive down to the FLOWER
+  while the intake spins, raise the lift while the robot lines up. Each leg is its own
+  short sequence of moves, actions and waits, and the group ends when **all legs finish**,
+  when **leg 1 finishes** (the rest are interrupted), or when **any leg finishes**. Those
+  are Ivy's `parallel`, `deadline` and `race`, and that is what the export emits. The
+  timeline charges the group its own elapsed time rather than the sum of its legs, so
+  overlapping work actually shows up as time saved. One leg drives — there is only one
+  drivetrain — and the planner says so if a second one tries, or if the group ends before
+  the driving leg's path does.
 - **Decisions as first-class steps.** A decision branches on a match state — *hive tipped*,
   *partner start*, *partner scored*, or anything you define. Decisions nest, and everything
   after one is planned separately per case.
@@ -56,7 +65,8 @@ and export a [Pedro Pathing](https://pedropathing.com/) OpMode that makes those 
   that swings its heading is slower again, and acceleration falls out of the motor's
   torque curve and the grip of the tiles.
 - **Java export.** Boolean states become `Commands.conditional(...)`, enum states become
-  `Commands.match(...)` with an `EnumMap`. Both read their supplier when the robot *reaches*
+  `Commands.match(...)` with an `EnumMap`; parallel groups become `Groups.parallel(...)`,
+  `Groups.deadline(...)` or `Groups.race(...)`, one argument per leg. Both read their supplier when the robot *reaches*
   them, so a mid-auto decision works the way you'd expect. Pose and `Path` methods are
   deduplicated by geometry, and the state readers and mechanism calls come out as `TODO`
   stubs for you to wire up.
@@ -73,7 +83,9 @@ and export a [Pedro Pathing](https://pedropathing.com/) OpMode that makes those 
    it takes — in the Actions tab. An Action step in the plan picks one from that list, so
    the same call is described once however many times the plan runs it, and renaming or
    retiming it there updates every step that uses it.
-4. Build the plan in the left rail: **Move**, **Action**, **Wait**, **Decision**.
+4. Build the plan in the left rail: **Move**, **Action**, **Wait**, **Parallel**,
+   **Decision**. A new parallel group arrives set up for the usual case — a drive leg and
+   a mechanism leg, ending when the drive does.
 5. Flip the state chips to walk each branch; check the Routes tab for the slowest one.
 6. Copy the OpMode from the Code tab into your `teamcode` package — once as planned, and
    once from the mirrored side if you want the matching OpMode for the other alliance.
@@ -94,6 +106,10 @@ copy a plan out or paste one back in to move it between machines.
   Pedro's own `Pose.mirror()` is the left-right `mirrorX` reflection, not this rotation —
   it suits fields whose halves are mirror images, and it will put a BIOBUZZ plan in the
   wrong corner.
+- A parallel group that ends early cuts its driving leg off part-way down the path, and
+  where the robot actually coasts to is not something this planner can work out. It carries
+  on as if the move had finished and flags the group — so treat every pose after a clipped
+  group as a guess until you have run it.
 - Timings come from a model, not your robot. It assumes four mecanum wheels driven by
   four motors, takes stall torque from the motor's free speed the way the goBILDA 5203
   range behaves, and uses one grip figure for all of them. Drivetrain efficiency is the
